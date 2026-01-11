@@ -24,8 +24,8 @@ const ENTRY_KEY = 'mastery_engine_entered';
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB Limit
 
 const MODELS = [
-  { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', desc: 'Complex reasoning' },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', desc: 'Fast & efficient' },
+  { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', desc: 'Complex reasoning' },
   { id: 'gemini-1.5-pro-preview-0514', name: 'Gemini 1.5 Pro (v0514)', desc: 'Large context' },
   { id: 'gemini-2.5-flash-lite-latest', name: 'Gemini 2.5 Lite', desc: 'Lightweight' },
 ];
@@ -355,6 +355,7 @@ const App: React.FC = () => {
     setError(null);
 
     try {
+      // Build history excluding the latest user message to avoid duplication
       const history = messages.map(msg => ({
         role: msg.role === 'assistant' ? 'model' : 'user' as 'model' | 'user',
         parts: [{ text: msg.content }]

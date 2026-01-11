@@ -22,15 +22,26 @@ const mapErrorToUserMessage = (error: any): string => {
   if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
     return "Unable to reach the Engine. Please check your internet connection and try again.";
   }
+  if (errorMessage.includes("500") || errorMessage.includes("rpc failed") || errorMessage.includes("xhr error")) {
+    return "The Engine encountered a server-side connectivity issue. This is usually transient—please try your request again in a moment.";
+  }
   
   return "The Mastery Engine encountered an unexpected hiccup. Please try refreshing your session.";
+};
+
+/**
+ * Limit history to the last N messages to avoid payload limits and proxy timeouts
+ */
+const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 10) => {
+  if (history.length <= limit) return history;
+  return history.slice(-limit);
 };
 
 export const getGeminiResponse = async (
   userMessage: string, 
   history: { role: 'user' | 'model', parts: { text: string }[] }[],
   attachment?: FileData,
-  modelName: string = 'gemini-3-pro-preview'
+  modelName: string = 'gemini-3-flash-preview'
 ) => {
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   
@@ -46,10 +57,13 @@ export const getGeminiResponse = async (
       });
     }
 
+    // Defensive check: if history is too long, trim it
+    const trimmedHistory = trimHistory(history);
+
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: modelName,
       contents: [
-        ...history,
+        ...trimmedHistory,
         { role: 'user', parts: userParts }
       ],
       config: {
@@ -58,21 +72,14 @@ export const getGeminiResponse = async (
         CRITICAL CORE DIRECTIVE: Never provide a direct answer immediately. You must first break down the underlying concept or logic.
         
         RESPONSE STRUCTURE:
-        1. THE CORE PRINCIPLE: Explain the 'Why' and the fundamental logic. Focus on the abstract rules that govern the subject.
-        2. AN ANALOGY: Provide a vivid, real-world comparison that makes the concept intuitive and concrete.
-        3. THE APPLICATION: Finally, show how the logic established above specifically solves the student's question.
-        4. CONCEPT MAP: (Optional) Use Mermaid.js to visualize the hierarchy or process. Keep it simple (max 8 nodes).
+        1. THE CORE PRINCIPLE: Explain the 'Why' and the fundamental logic.
+        2. AN ANALOGY: Provide a vivid comparison.
+        3. THE APPLICATION: Specifically solve the student's question based on the logic above.
+        4. CONCEPT MAP: (Optional) Visualize the process with simple Mermaid.js.
         
-        Mermaid Visualization Rules:
-        - Use simple flowchart or graph syntax.
-        - Ensure nodes represent key concepts.
-        
-        General Tone:
-        - Academic, encouraging, and clear.
-        - Always finish with: [RELATED_TOPICS: Topic A, Topic B, Topic C]
-        - No text must follow the [RELATED_TOPICS] tag.`,
+        Always finish with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`,
         temperature: 0.7,
-        topP: 0.95,
+        topP: 0.9,
       },
     });
 
@@ -87,15 +94,18 @@ export const generateSpeech = async (text: string): Promise<string | undefined> 
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   
   try {
+    // Clean text: strip diagrams, related topics, and markdown symbols
     const cleanText = text
-      .replace(/```mermaid[\s\S]*?```/g, 'referencing the diagram below')
+      .replace(/```mermaid[\s\S]*?```/g, '')
       .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '')
       .replace(/[#*`]/g, '')
       .trim();
 
+    if (!cleanText) return undefined;
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `Explain this academic concept clearly: ${cleanText}` }] }],
+      contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
@@ -109,6 +119,7 @@ export const generateSpeech = async (text: string): Promise<string | undefined> 
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (error) {
     console.error("Speech Generation Error:", error);
+    // Silent fail for speech, as it's an optional enhancement
     return undefined;
   }
 };
