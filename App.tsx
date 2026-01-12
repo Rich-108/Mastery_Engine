@@ -255,6 +255,43 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExportChat = () => {
+    if (messages.length === 0) return;
+
+    const date = new Date();
+    const timestampStr = date.toLocaleString();
+    let exportText = `MASTERY ENGINE - CHAT EXPORT\n`;
+    exportText += `Generated: ${timestampStr}\n`;
+    exportText += `--------------------------------------------------\n\n`;
+
+    messages.forEach((msg) => {
+      const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const role = msg.role === 'assistant' ? 'MASTERY ENGINE' : 'STUDENT';
+      
+      // Clean up mermaid code blocks and related topics for better readability in txt
+      const content = msg.content
+        .replace(/```mermaid[\s\S]*?```/g, '[Conceptual Map Diagram Included]')
+        .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '');
+
+      exportText += `[${time}] ${role}:\n${content.trim()}\n\n`;
+    });
+
+    exportText += `--------------------------------------------------\n`;
+    exportText += `End of Export.`;
+
+    const blob = new Blob([exportText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    const fileTimestamp = date.toISOString().replace(/[:.]/g, '-').slice(0, 16);
+    link.href = url;
+    link.download = `mastery-engine-export-${fileTimestamp}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleAddToGlossary = (term: string, definition: string) => {
     const newItem: GlossaryItem = {
       id: Date.now().toString(),
@@ -405,7 +442,7 @@ const App: React.FC = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <div>
+          <div className="hidden xs:block">
             <div className="flex items-center space-x-2">
               <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight transition-colors text-nowrap">Mastery Engine</h1>
               {showSavedIndicator && (
@@ -421,7 +458,7 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <div className="flex items-center space-x-3 md:space-x-5">
+        <div className="flex items-center space-x-2 md:space-x-4">
           <button 
             onClick={() => setIsInfoOpen(true)}
             className="p-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
@@ -445,15 +482,28 @@ const App: React.FC = () => {
             )}
           </button>
 
-          <select 
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-1.5 text-xs font-bold text-slate-600 dark:text-slate-300 focus:outline-none cursor-pointer hidden sm:block"
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
+
+          <button 
+            onClick={handleExportChat}
+            disabled={messages.length <= 1}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 transition-all text-xs font-bold ${messages.length <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
-            {MODELS.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span className="hidden md:inline">Export</span>
+          </button>
+          
+          <button 
+            onClick={() => setIsConfirmClearOpen(true)}
+            className="px-3 py-1.5 rounded-full border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs font-bold"
+          >
+            <span className="hidden sm:inline">Clear History</span>
+            <span className="sm:hidden">Clear</span>
+          </button>
+
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
 
           <button 
             onClick={toggleDarkMode}
@@ -468,14 +518,6 @@ const App: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
               </svg>
             )}
-          </button>
-          
-          <button 
-            onClick={() => setIsConfirmClearOpen(true)}
-            className="px-3 py-1.5 rounded-full border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs font-bold"
-          >
-            <span className="hidden sm:inline">Clear History</span>
-            <span className="sm:hidden">Clear</span>
           </button>
         </div>
       </header>

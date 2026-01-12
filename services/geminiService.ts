@@ -2,39 +2,34 @@
 import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { FileData } from "../types";
 
-const API_KEY = process.env.API_KEY || '';
-
 /**
- * Maps technical API errors to student-friendly academic feedback
+ * Maps technical API errors to student-friendly academic feedback.
+ * 401 and 403 errors are common if the API_KEY is missing or invalid in the environment.
  */
 const mapErrorToUserMessage = (error: any): string => {
   const errorMessage = error?.message?.toLowerCase() || "";
   
   if (errorMessage.includes("429") || errorMessage.includes("rate limit")) {
-    return "The Engine is processing a high volume of requests. Please wait a few seconds before asking your next question.";
+    return "The Engine is processing a high volume of requests. Please wait a few seconds.";
   }
   if (errorMessage.includes("safety") || errorMessage.includes("blocked")) {
-    return "This inquiry was filtered for safety. Please rephrase your question to focus on academic and conceptual exploration.";
+    return "This inquiry was filtered for safety. Please focus on academic exploration.";
   }
-  if (errorMessage.includes("api key") || errorMessage.includes("invalid")) {
-    return "There's an issue with the Engine's authorization. Please contact support or check your connection.";
+  if (errorMessage.includes("api key") || errorMessage.includes("invalid") || errorMessage.includes("401") || errorMessage.includes("403")) {
+    return "There's an issue with the Engine's authorization. Please ensure the environment configuration is correct.";
   }
   if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
-    return "Unable to reach the Engine. Please check your internet connection and try again.";
+    return "Unable to reach the Engine. Please check your internet connection.";
   }
-  if (errorMessage.includes("500") || errorMessage.includes("rpc failed") || errorMessage.includes("xhr error")) {
-    return "The Engine encountered a server-side connectivity issue. This is usually transient—please try your request again in a moment.";
+  if (errorMessage.includes("500") || errorMessage.includes("rpc failed")) {
+    return "The Engine encountered a server connectivity issue. Please try again in a moment.";
   }
   
-  return "The Mastery Engine encountered an unexpected hiccup. Please try refreshing your session.";
+  return "The Mastery Engine encountered an unexpected error. Please refresh your session.";
 };
 
-/**
- * Limit history to the last N messages to avoid payload limits and proxy timeouts
- */
-const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 10) => {
-  if (history.length <= limit) return history;
-  return history.slice(-limit);
+const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 8) => {
+  return history.length <= limit ? history : history.slice(-limit);
 };
 
 export const getGeminiResponse = async (
@@ -43,7 +38,8 @@ export const getGeminiResponse = async (
   attachment?: FileData,
   modelName: string = 'gemini-3-flash-preview'
 ) => {
-  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  // Initialize right before call to ensure up-to-date process.env access
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const userParts: any[] = [{ text: userMessage }];
@@ -57,7 +53,6 @@ export const getGeminiResponse = async (
       });
     }
 
-    // Defensive check: if history is too long, trim it
     const trimmedHistory = trimHistory(history);
 
     const response: GenerateContentResponse = await ai.models.generateContent({
@@ -67,23 +62,29 @@ export const getGeminiResponse = async (
         { role: 'user', parts: userParts }
       ],
       config: {
-        systemInstruction: `You are Mastery Engine, a specialized conceptual tutor designed to help students achieve deep understanding.
+        systemInstruction: `You are Mastery Engine, a conceptual tutor.
         
-        CRITICAL CORE DIRECTIVE: Never provide a direct answer immediately. You must first break down the underlying concept or logic.
+        GREETING PROTOCOL:
+        If the input is a greeting or general talk, be warm and extremely brief (1 sentence). No 4-step structure.
         
-        RESPONSE STRUCTURE:
-        1. THE CORE PRINCIPLE: Explain the 'Why' and the fundamental logic.
-        2. AN ANALOGY: Provide a vivid comparison.
-        3. THE APPLICATION: Specifically solve the student's question based on the logic above.
-        4. CONCEPT MAP: (Optional) Visualize the process with simple Mermaid.js.
+        SUBJECT INQUIRY PROTOCOL:
+        For academic subjects, use this structure:
+        1. THE CORE PRINCIPLE: Explain the logic simply.
+        2. AN ANALOGY: Use a real-world comparison.
+        3. THE APPLICATION: Solve the specific problem step-by-step.
+        4. CONCEPT MAP: ONLY generate a Mermaid diagram if the process is extremely complex (more than 3 interacting parts). Otherwise, skip this section.
         
-        Always finish with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`,
+        STYLING CONSTRAINTS:
+        - NEVER use markdown symbols like #, *, **, _, or >.
+        - Use ALL CAPS for section titles only.
+        - Use double line breaks between paragraphs.
+        - No bullet points; use simple spaces for indentation.
+        - Finish with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`,
         temperature: 0.7,
-        topP: 0.9,
       },
     });
 
-    return response.text || "The Engine generated an empty response. Please try rephrasing your inquiry.";
+    return response.text || "No response generated.";
   } catch (error) {
     console.error("Gemini API Error:", error);
     throw new Error(mapErrorToUserMessage(error));
@@ -91,10 +92,9 @@ export const getGeminiResponse = async (
 };
 
 export const generateSpeech = async (text: string): Promise<string | undefined> => {
-  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
-    // Clean text: strip diagrams, related topics, and markdown symbols
     const cleanText = text
       .replace(/```mermaid[\s\S]*?```/g, '')
       .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '')
@@ -118,8 +118,6 @@ export const generateSpeech = async (text: string): Promise<string | undefined> 
 
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (error) {
-    console.error("Speech Generation Error:", error);
-    // Silent fail for speech, as it's an optional enhancement
     return undefined;
   }
 };
