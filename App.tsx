@@ -12,7 +12,7 @@ import LandingPage from './components/LandingPage';
 const INITIAL_MESSAGE: Message = {
   id: 'welcome',
   role: 'assistant',
-  content: "Hello! I'm your Mastery Engine. Ask me any question about your studies, or upload an image of your textbook/notes, and I'll help you master the core concepts. What are we exploring today?\n\n[RELATED_TOPICS: Photosynthesis, Quantum Mechanics, French Revolution]",
+  content: "Hello! I'm your Mastery Engine. Your learning history is preserved here. What concept should we dive into next?",
   timestamp: new Date(),
 };
 
@@ -26,7 +26,6 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB Limit
 const MODELS = [
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', desc: 'Fast & efficient' },
   { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', desc: 'Complex reasoning' },
-  { id: 'gemini-1.5-pro-preview-0514', name: 'Gemini 1.5 Pro (v0514)', desc: 'Large context' },
   { id: 'gemini-2.5-flash-lite-latest', name: 'Gemini 2.5 Lite', desc: 'Lightweight' },
 ];
 
@@ -49,7 +48,6 @@ const App: React.FC = () => {
           timestamp: new Date(m.timestamp)
         }));
       } catch (e) {
-        console.error("Failed to parse saved chat history", e);
         return [INITIAL_MESSAGE];
       }
     }
@@ -66,7 +64,6 @@ const App: React.FC = () => {
           timestamp: new Date(item.timestamp)
         }));
       } catch (e) {
-        console.error("Failed to parse glossary", e);
         return [];
       }
     }
@@ -91,7 +88,6 @@ const App: React.FC = () => {
     return false;
   });
 
-  // Undo/Redo State
   const [inputHistory, setInputHistory] = useState<string[]>(['']);
   const [historyIndex, setHistoryIndex] = useState(0);
   const isInternalUpdate = useRef(false);
@@ -106,7 +102,6 @@ const App: React.FC = () => {
     localStorage.setItem(ENTRY_KEY, 'true');
   };
 
-  // Undo/Redo logic
   useEffect(() => {
     if (isInternalUpdate.current) {
       isInternalUpdate.current = false;
@@ -146,26 +141,6 @@ const App: React.FC = () => {
   }, [historyIndex, inputHistory]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isZ = e.key.toLowerCase() === 'z';
-      const isMeta = e.metaKey || e.ctrlKey;
-      const isShift = e.shiftKey;
-
-      if (isMeta && isZ) {
-        e.preventDefault();
-        if (isShift) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
-
-  useEffect(() => {
     if (!hasEntered) return;
     messagesRef.current = messages;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
@@ -195,13 +170,12 @@ const App: React.FC = () => {
       setShowSavedIndicator(true);
       setTimeout(() => setShowSavedIndicator(false), 3000);
     }, 30000);
-
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isLoading]);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -227,22 +201,13 @@ const App: React.FC = () => {
         setInput(prev => (prev ? `${prev} ${transcript}` : transcript));
         setIsRecording(false);
       };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setError(`Voice input failed. Please ensure your microphone permissions are enabled.`);
-        setIsRecording(false);
-      };
-
-      recognition.onend = () => {
-        setIsRecording(false);
-      };
-
+      recognition.onerror = () => setIsRecording(false);
+      recognition.onend = () => setIsRecording(false);
       recognitionRef.current = recognition;
     }
   }, []);
 
-  const handleClearHistory = () => {
+  const handleNewSession = () => {
     const freshMessage = { ...INITIAL_MESSAGE, timestamp: new Date() };
     setMessages([freshMessage]);
     localStorage.setItem(STORAGE_KEY, JSON.stringify([freshMessage]));
@@ -250,46 +215,24 @@ const App: React.FC = () => {
     setSelectedFile(null);
     setError(null);
     setIsLoading(false);
-    if (isRecording) {
-      recognitionRef.current?.stop();
-    }
   };
 
   const handleExportChat = () => {
     if (messages.length === 0) return;
-
     const date = new Date();
-    const timestampStr = date.toLocaleString();
-    let exportText = `MASTERY ENGINE - CHAT EXPORT\n`;
-    exportText += `Generated: ${timestampStr}\n`;
-    exportText += `--------------------------------------------------\n\n`;
-
+    let exportText = `MASTERY ENGINE - PERSISTENT ANALYSIS LOG\nGenerated: ${date.toLocaleString()}\n\n`;
     messages.forEach((msg) => {
-      const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const role = msg.role === 'assistant' ? 'MASTERY ENGINE' : 'STUDENT';
-      
-      // Clean up mermaid code blocks and related topics for better readability in txt
-      const content = msg.content
-        .replace(/```mermaid[\s\S]*?```/g, '[Conceptual Map Diagram Included]')
-        .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '');
-
-      exportText += `[${time}] ${role}:\n${content.trim()}\n\n`;
+      const role = msg.role === 'assistant' ? 'ENGINE' : 'STUDENT';
+      exportText += `[${msg.timestamp.toLocaleTimeString()}] ${role}:\n${msg.content.trim()}\n\n`;
     });
-
-    exportText += `--------------------------------------------------\n`;
-    exportText += `End of Export.`;
-
     const blob = new Blob([exportText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    
-    const fileTimestamp = date.toISOString().replace(/[:.]/g, '-').slice(0, 16);
     link.href = url;
-    link.download = `mastery-engine-export-${fileTimestamp}.txt`;
+    link.download = `mastery-session-${date.toISOString().slice(0, 10)}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   const handleAddToGlossary = (term: string, definition: string) => {
@@ -309,53 +252,22 @@ const App: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
-      setError(`File is too large (${sizeInMB}MB). Limit is 5MB.`);
+      setError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Limit is 5MB.`);
       return;
     }
-
-    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-    if (!validTypes.includes(file.type)) {
-      setError("Please upload an image or PDF.");
-      return;
-    }
-
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
-      const base64Data = base64.split(',')[1];
-      setSelectedFile({
-        data: base64Data,
-        mimeType: file.type
-      });
+      setSelectedFile({ data: base64.split(',')[1], mimeType: file.type });
       setError(null);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const removeFile = () => {
-    setSelectedFile(null);
-    setError(null);
-  };
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-  };
-
-  const handleCloseTutorial = () => {
-    setIsTutorialOpen(false);
-    localStorage.setItem(TUTORIAL_KEY, 'true');
-  };
-
   const toggleVoiceInput = () => {
-    if (!recognitionRef.current) {
-      setError("Speech recognition is not supported in your browser.");
-      return;
-    }
-
+    if (!recognitionRef.current) return;
     if (isRecording) {
       recognitionRef.current.stop();
     } else {
@@ -365,22 +277,18 @@ const App: React.FC = () => {
         setIsRecording(true);
       } catch (err) {
         setIsRecording(false);
-        setError("Microphone access denied.");
       }
     }
   };
 
   const sendMessage = async (text: string, file?: FileData | null) => {
     if ((!text.trim() && !file) || isLoading) return;
-
-    if (isRecording) {
-      recognitionRef.current.stop();
-    }
+    if (isRecording) recognitionRef.current.stop();
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: text || (file?.mimeType.startsWith('image/') ? "[Sent Image]" : "[Sent Document]"),
+      content: text || (file?.mimeType.startsWith('image/') ? "[Image Attached]" : "[File Attached]"),
       timestamp: new Date(),
       attachment: file || undefined
     };
@@ -392,14 +300,13 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      // Build history excluding the latest user message to avoid duplication
       const history = messages.map(msg => ({
         role: msg.role === 'assistant' ? 'model' : 'user' as 'model' | 'user',
         parts: [{ text: msg.content }]
       }));
 
       const responseText = await getGeminiResponse(
-        text || "Please analyze this attached content.", 
+        text || "Analyze this content in the context of our existing session.", 
         history, 
         file || undefined,
         selectedModel
@@ -411,273 +318,102 @@ const App: React.FC = () => {
         content: responseText,
         timestamp: new Date(),
       };
-
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Engine network issue.');
+      setError(err instanceof Error ? err.message : 'Persistent network issue.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSend = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    sendMessage(input, selectedFile);
-  };
-
-  const handleSelectTopic = (topic: string) => {
-    sendMessage(`Tell me about the concept of: ${topic}`);
-  };
-
-  if (!hasEntered) {
-    return <LandingPage onEnter={handleEnter} isDarkMode={isDarkMode} />;
-  }
+  if (!hasEntered) return <LandingPage onEnter={handleEnter} isDarkMode={isDarkMode} />;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
-      <header role="banner" className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex items-center justify-between shadow-sm z-10 transition-colors duration-300">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex items-center justify-between shadow-sm z-10">
         <div className="flex items-center space-x-3">
-          <div className="bg-indigo-600 p-2 rounded-lg" aria-hidden="true">
+          <div className="bg-indigo-600 p-2 rounded-lg">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
           <div className="hidden xs:block">
             <div className="flex items-center space-x-2">
-              <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight transition-colors text-nowrap">Mastery Engine</h1>
-              {showSavedIndicator && (
-                <span role="status" aria-live="polite" className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-                  SAVED
-                </span>
-              )}
+              <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight">Mastery Engine</h1>
+              {showSavedIndicator && <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">HISTORY SECURE</span>}
             </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium flex items-center transition-colors uppercase tracking-wider">
-              <span className={`h-1.5 w-1.5 rounded-full mr-1.5 ${showSavedIndicator ? 'bg-emerald-500' : 'bg-indigo-500 animate-pulse'}`} aria-hidden="true"></span>
-              Active Analysis
-            </p>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider">Active Learning Stream</p>
           </div>
         </div>
         
         <div className="flex items-center space-x-2 md:space-x-4">
-          <button 
-            onClick={() => setIsInfoOpen(true)}
-            className="p-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-            title="Project Info"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <button onClick={() => setIsGlossaryOpen(true)} className="relative p-2 rounded-full text-slate-500 hover:text-indigo-600 transition-all" title="Glossary">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+            {glossary.length > 0 && <span className="absolute top-0 right-0 h-2 w-2 bg-indigo-500 rounded-full"></span>}
           </button>
 
-          <button 
-            onClick={() => setIsGlossaryOpen(true)}
-            className="relative p-2 rounded-full text-slate-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 transition-all"
-            title="Open Glossary"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-            {glossary.length > 0 && (
-              <span className="absolute top-0 right-0 h-2 w-2 bg-indigo-500 rounded-full border border-white dark:border-slate-900"></span>
-            )}
-          </button>
-
-          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
-
-          <button 
-            onClick={handleExportChat}
-            disabled={messages.length <= 1}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 transition-all text-xs font-bold ${messages.length <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            <span className="hidden md:inline">Export</span>
+          <button onClick={handleExportChat} disabled={messages.length <= 1} className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all disabled:opacity-30">
+            <span className="hidden md:inline">Export Analysis</span>
           </button>
           
-          <button 
-            onClick={() => setIsConfirmClearOpen(true)}
-            className="px-3 py-1.5 rounded-full border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs font-bold"
-          >
-            <span className="hidden sm:inline">Clear History</span>
-            <span className="sm:hidden">Clear</span>
+          <button onClick={() => setIsConfirmClearOpen(true)} className="px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-red-500 dark:hover:text-red-400 text-xs font-bold transition-all">
+            New Session
           </button>
 
-          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
-
-          <button 
-            onClick={toggleDarkMode}
-            className="p-2 rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-all"
-          >
-            {isDarkMode ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 18v1m9-11h1m-18 0h1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-              </svg>
-            )}
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 rounded-full text-slate-500 transition-all">
+            {isDarkMode ? <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 18v1m9-11h1m-18 0h1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg> : <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>}
           </button>
         </div>
       </header>
 
-      <main id="main-content" className="flex-1 overflow-y-auto px-4 py-8 md:px-12 custom-scrollbar transition-colors">
+      <main className="flex-1 overflow-y-auto px-4 py-8 md:px-12 custom-scrollbar">
         <div className="max-w-4xl mx-auto">
+          {messages.length > 5 && (
+            <div className="mb-8 flex items-center justify-center">
+              <div className="h-px flex-1 bg-slate-100 dark:bg-slate-900"></div>
+              <span className="px-4 text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.2em]">Prior Context Retained</span>
+              <div className="h-px flex-1 bg-slate-100 dark:bg-slate-900"></div>
+            </div>
+          )}
           {messages.map((msg) => (
-            <ChatMessage 
-              key={msg.id} 
-              message={msg} 
-              onSelectTopic={handleSelectTopic}
-              isDarkMode={isDarkMode}
-            />
+            <ChatMessage key={msg.id} message={msg} onSelectTopic={(t) => sendMessage(`Deep dive: ${t}`)} isDarkMode={isDarkMode} />
           ))}
-          
           {isLoading && (
             <div className="flex justify-start mb-6 animate-pulse">
-              <div className="flex-shrink-0 h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900/40 mr-3 flex items-center justify-center">
-                <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">ME</span>
-              </div>
-              <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl rounded-tl-none px-6 py-4 shadow-sm">
-                <div className="flex space-x-2">
-                  <div className="h-2 w-2 bg-indigo-400 rounded-full animate-bounce"></div>
-                  <div className="h-2 w-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div>
-                  <div className="h-2 w-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div>
-                </div>
+              <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 mr-3 flex items-center justify-center"><span className="text-[10px] font-bold text-slate-400">ME</span></div>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl px-6 py-4 shadow-sm border border-slate-50 dark:border-slate-800">
+                <div className="flex space-x-1.5"><div className="h-1.5 w-1.5 bg-indigo-500 rounded-full animate-bounce"></div><div className="h-1.5 w-1.5 bg-indigo-500 rounded-full animate-bounce delay-75"></div><div className="h-1.5 w-1.5 bg-indigo-500 rounded-full animate-bounce delay-150"></div></div>
               </div>
             </div>
           )}
-
-          {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 text-red-600 dark:text-red-300 rounded-xl mb-6 text-sm flex items-start">
-              <div className="flex-1">
-                <p className="font-semibold mb-1">Attention Required</p>
-                <p className="text-xs leading-relaxed opacity-90">{error}</p>
-              </div>
-            </div>
-          )}
+          {error && <div className="p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 text-red-600 dark:text-red-400 rounded-xl mb-6 text-xs font-medium">{error}</div>}
           <div ref={messagesEndRef} />
         </div>
       </main>
 
-      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 md:p-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] transition-colors">
+      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 md:p-6 transition-colors">
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-2 px-1">
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={handleUndo}
-                disabled={historyIndex === 0}
-                className={`p-1 rounded-md transition-all ${historyIndex === 0 ? 'text-slate-200 dark:text-slate-800' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l5 5m-5-5l5-5" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={handleRedo}
-                disabled={historyIndex >= inputHistory.length - 1}
-                className={`p-1 rounded-md transition-all ${historyIndex >= inputHistory.length - 1 ? 'text-slate-200 dark:text-slate-800' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10H11a8 8 0 00-8 8v2M21 10l-5 5m5-5l-5-5" />
-                </svg>
-              </button>
-            </div>
-            {selectedFile && <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">File Attached</span>}
-          </div>
-
-          <form onSubmit={handleSend} className="flex items-center space-x-3">
+          <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-3">
             <div className="relative flex-1">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={isRecording ? "Listening..." : "Ask your academic question..."}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 pr-24 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-slate-200"
-                disabled={isLoading}
-              />
+              <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={isRecording ? "Listening to your question..." : "Ask your conceptual question..."} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 py-3 pr-24 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-slate-200" disabled={isLoading} />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1">
-                <button 
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-slate-400 hover:text-indigo-600 transition-all"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                  </svg>
-                </button>
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="image/*,application/pdf"
-                  onChange={handleFileChange}
-                />
-                <button 
-                  type="button"
-                  onClick={toggleVoiceInput}
-                  className={`p-2 rounded-lg transition-all ${isRecording ? 'bg-red-100 dark:bg-red-900 text-red-600' : 'text-slate-400 hover:text-indigo-600'}`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600"><svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg></button>
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} />
+                <button type="button" onClick={toggleVoiceInput} className={`p-2 rounded-lg transition-all ${isRecording ? 'text-red-600' : 'text-slate-400'}`}><svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg></button>
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={(!input.trim() && !selectedFile) || isLoading}
-              className={`flex items-center justify-center h-12 w-12 rounded-xl transition-all shadow-md
-                ${(!input.trim() && !selectedFile) || isLoading 
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-400' 
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
+            <button type="submit" disabled={(!input.trim() && !selectedFile) || isLoading} className={`flex items-center justify-center h-12 w-12 rounded-xl transition-all ${(!input.trim() && !selectedFile) || isLoading ? 'bg-slate-100 text-slate-400' : 'bg-indigo-600 text-white shadow-lg active:scale-95'}`}>
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
           </form>
-          {selectedFile && (
-            <div className="mt-3 flex items-center space-x-2 animate-in fade-in slide-in-from-top-1">
-              <span className="text-[10px] font-bold text-indigo-500 uppercase">File Attached</span>
-              <button onClick={removeFile} className="text-red-500 text-[10px] font-bold uppercase hover:underline">Remove</button>
-            </div>
-          )}
+          {selectedFile && <div className="mt-2 text-[10px] font-bold text-indigo-500 uppercase flex items-center">Context File Ready • <button onClick={() => setSelectedFile(null)} className="ml-1 text-red-500">Remove</button></div>}
         </div>
       </footer>
 
-      <Glossary 
-        items={glossary} 
-        isOpen={isGlossaryOpen} 
-        onClose={() => setIsGlossaryOpen(false)} 
-        onRemove={handleRemoveFromGlossary}
-        onAdd={handleAddToGlossary}
-        isDarkMode={isDarkMode}
-      />
-
-      <TutorialOverlay 
-        isOpen={isTutorialOpen}
-        onClose={handleCloseTutorial}
-        isDarkMode={isDarkMode}
-      />
-
-      <ProjectInfoModal 
-        isOpen={isInfoOpen}
-        onClose={() => setIsInfoOpen(false)}
-        isDarkMode={isDarkMode}
-      />
-
-      <ConfirmationModal
-        isOpen={isConfirmClearOpen}
-        onClose={() => setIsConfirmClearOpen(false)}
-        onConfirm={handleClearHistory}
-        title="Clear Analysis History?"
-        message="This will delete your current session history. Your Glossary items will remain safe."
-        confirmLabel="Yes, Clear Everything"
-        isDarkMode={isDarkMode}
-      />
+      <Glossary items={glossary} isOpen={isGlossaryOpen} onClose={() => setIsGlossaryOpen(false)} onRemove={handleRemoveFromGlossary} onAdd={handleAddToGlossary} isDarkMode={isDarkMode} />
+      <TutorialOverlay isOpen={isTutorialOpen} onClose={() => { setIsTutorialOpen(false); localStorage.setItem(TUTORIAL_KEY, 'true'); }} isDarkMode={isDarkMode} />
+      <ProjectInfoModal isOpen={isInfoOpen} onClose={() => setIsInfoOpen(false)} isDarkMode={isDarkMode} />
+      <ConfirmationModal isOpen={isConfirmClearOpen} onClose={() => setIsConfirmClearOpen(false)} onConfirm={handleNewSession} title="Start New Session?" message="This will clear the current analysis history for a fresh start. Your glossary is safe." confirmLabel="Yes, New Session" isDarkMode={isDarkMode} />
     </div>
   );
 };

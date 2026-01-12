@@ -4,7 +4,7 @@ import { FileData } from "../types";
 
 /**
  * Maps technical API errors to student-friendly academic feedback.
- * 401 and 403 errors are common if the API_KEY is missing or invalid in the environment.
+ * Specifically handles Netlify/Deployment authorization issues.
  */
 const mapErrorToUserMessage = (error: any): string => {
   const errorMessage = error?.message?.toLowerCase() || "";
@@ -16,19 +16,22 @@ const mapErrorToUserMessage = (error: any): string => {
     return "This inquiry was filtered for safety. Please focus on academic exploration.";
   }
   if (errorMessage.includes("api key") || errorMessage.includes("invalid") || errorMessage.includes("401") || errorMessage.includes("403")) {
-    return "There's an issue with the Engine's authorization. Please ensure the environment configuration is correct.";
+    return "Authorization failed. If you are on Netlify, ensure the API_KEY environment variable is set in your Site Settings.";
   }
   if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
     return "Unable to reach the Engine. Please check your internet connection.";
   }
   if (errorMessage.includes("500") || errorMessage.includes("rpc failed")) {
-    return "The Engine encountered a server connectivity issue. Please try again in a moment.";
+    return "The Engine encountered a server connectivity issue. Your current chat is preserved; please try the last request again.";
   }
   
-  return "The Mastery Engine encountered an unexpected error. Please refresh your session.";
+  return "The Mastery Engine encountered an unexpected error. Your conversation history is still safe.";
 };
 
-const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 8) => {
+/**
+ * Increased limit to 25 messages to satisfy the request for more "available" context.
+ */
+const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 25) => {
   return history.length <= limit ? history : history.slice(-limit);
 };
 
@@ -38,7 +41,6 @@ export const getGeminiResponse = async (
   attachment?: FileData,
   modelName: string = 'gemini-3-flash-preview'
 ) => {
-  // Initialize right before call to ensure up-to-date process.env access
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -65,20 +67,22 @@ export const getGeminiResponse = async (
         systemInstruction: `You are Mastery Engine, a conceptual tutor.
         
         GREETING PROTOCOL:
-        If the input is a greeting or general talk, be warm and extremely brief (1 sentence). No 4-step structure.
+        If the input is a greeting, respond with 1 warm sentence.
+        
+        CONTEXTUAL AWARENESS:
+        You have access to the full conversation history. Always refer back to previous concepts if the student asks follow-up questions. Do not 'auto-clear' your memory.
         
         SUBJECT INQUIRY PROTOCOL:
-        For academic subjects, use this structure:
-        1. THE CORE PRINCIPLE: Explain the logic simply.
-        2. AN ANALOGY: Use a real-world comparison.
-        3. THE APPLICATION: Solve the specific problem step-by-step.
-        4. CONCEPT MAP: ONLY generate a Mermaid diagram if the process is extremely complex (more than 3 interacting parts). Otherwise, skip this section.
+        Use this structure for academic topics:
+        1. THE CORE PRINCIPLE: Clear, foundational logic.
+        2. AN ANALOGY: A vivid comparison.
+        3. THE APPLICATION: Step-by-step solution.
+        4. CONCEPT MAP: Only use Mermaid diagrams for processes with 4+ steps.
         
         STYLING CONSTRAINTS:
-        - NEVER use markdown symbols like #, *, **, _, or >.
-        - Use ALL CAPS for section titles only.
-        - Use double line breaks between paragraphs.
-        - No bullet points; use simple spaces for indentation.
+        - NO markdown symbols (#, *, **, _, >).
+        - ALL CAPS for section headers.
+        - Double line breaks between paragraphs.
         - Finish with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`,
         temperature: 0.7,
       },
