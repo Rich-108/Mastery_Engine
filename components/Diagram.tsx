@@ -7,6 +7,17 @@ interface DiagramProps {
   isDarkMode?: boolean;
 }
 
+// Initialize mermaid once outside the component
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: 'loose',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+    curve: 'basis',
+  }
+});
+
 const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>('');
@@ -15,92 +26,82 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode }) => {
   const [isRendering, setIsRendering] = useState(true);
 
   useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: isDarkMode ? 'dark' : 'base',
-      securityLevel: 'loose',
-      flowchart: {
-        useMaxWidth: true,
-        htmlLabels: true,
-        curve: 'basis',
-      },
-      themeVariables: isDarkMode ? {
-        primaryColor: '#818cf8',
-        primaryTextColor: '#f8fafc',
-        primaryBorderColor: '#4f46e5',
-        lineColor: '#94a3b8',
-        secondaryColor: '#1e293b',
-        tertiaryColor: '#0f172a',
-        fontSize: '14px',
-        fontFamily: 'Inter, sans-serif',
-      } : {
-        primaryColor: '#6366f1',
-        primaryTextColor: '#ffffff',
-        primaryBorderColor: '#4338ca',
-        lineColor: '#64748b',
-        secondaryColor: '#f1f5f9',
-        tertiaryColor: '#f8fafc',
-        fontSize: '14px',
-        fontFamily: 'Inter, sans-serif',
-      }
-    });
+    let active = true;
 
     const renderDiagram = async () => {
-      if (!containerRef.current || !chart.trim()) {
-        setIsRendering(false);
+      if (!chart.trim()) {
+        if (active) setIsRendering(false);
         return;
       }
       
-      setIsRendering(true);
+      if (active) setIsRendering(true);
+      if (active) setError(null);
+
       try {
-        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-        const cleanChart = chart
+        // Update theme variables based on current mode
+        const theme = isDarkMode ? 'dark' : 'base';
+        const themeVariables = isDarkMode ? {
+          primaryColor: '#818cf8',
+          primaryTextColor: '#f8fafc',
+          primaryBorderColor: '#4f46e5',
+          lineColor: '#94a3b8',
+          secondaryColor: '#1e293b',
+          tertiaryColor: '#0f172a',
+          fontSize: '14px',
+          fontFamily: 'Inter, sans-serif',
+        } : {
+          primaryColor: '#6366f1',
+          primaryTextColor: '#ffffff',
+          primaryBorderColor: '#4338ca',
+          lineColor: '#64748b',
+          secondaryColor: '#f1f5f9',
+          tertiaryColor: '#f8fafc',
+          fontSize: '14px',
+          fontFamily: 'Inter, sans-serif',
+        };
+
+        mermaid.initialize({
+          theme,
+          themeVariables
+        });
+
+        const id = `mermaid-svg-${Math.random().toString(36).substring(2, 11)}`;
+        
+        // Sanitize chart code: remove potential LLM artifacts
+        let cleanChart = chart
           .replace(/&lt;/g, '<')
           .replace(/&gt;/g, '>')
           .trim();
-
-        // Check for common issues before rendering
-        if (cleanChart.length > 5000) {
-          setError({
-            title: 'Complexity Limit',
-            detail: 'This concept map is too large to render safely in the browser.'
-          });
-          setIsRendering(false);
-          return;
+        
+        // Ensure flowchart direction is specified if missing
+        if (!cleanChart.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/i)) {
+          cleanChart = `graph TD\n${cleanChart}`;
         }
 
-        // Small delay to allow the loading state to be visible if rendering is near-instant
-        await new Promise(resolve => setTimeout(resolve, 300));
-
+        // Render to SVG string
         const { svg: renderedSvg } = await mermaid.render(id, cleanChart);
-        setSvg(renderedSvg);
-        setError(null);
+        
+        if (active) {
+          setSvg(renderedSvg);
+          setIsRendering(false);
+        }
       } catch (err: any) {
         console.error('Mermaid render error:', err);
-        const errorMessage = err?.message || 'Unknown error';
-        
-        if (errorMessage.includes('Parse error')) {
+        if (active) {
           setError({
-            title: 'Mapping Syntax Error',
-            detail: 'The Engine generated invalid visual syntax. The conceptual structure is preserved in text above.'
+            title: 'Mapping Failed',
+            detail: 'The engine encountered a syntax error in the conceptual map. The text logic remains available above.'
           });
-        } else if (errorMessage.includes('maximum level of recursion') || errorMessage.includes('too much recursion')) {
-          setError({
-            title: 'Logic Loop Detected',
-            detail: 'The concept structure contains circular logic that exceeds mapping capabilities.'
-          });
-        } else {
-          setError({
-            title: 'Visual Mapping Failed',
-            detail: 'An unexpected error occurred during rendering. Please try rephrasing for a simpler visualization.'
-          });
+          setIsRendering(false);
         }
-      } finally {
-        setIsRendering(false);
       }
     };
 
     renderDiagram();
+
+    return () => {
+      active = false;
+    };
   }, [chart, isDarkMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -138,34 +139,43 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode }) => {
         aria-label={isZoomed ? "Close expanded conceptual map" : "Click to expand conceptual map"}
         aria-expanded={isZoomed}
         onKeyDown={handleKeyDown}
-        className={`bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-inner transition-all duration-500 cursor-zoom-in focus:outline-none focus:ring-4 focus:ring-indigo-500/50 min-h-[160px] flex flex-col items-center justify-center
+        className={`bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-inner transition-all duration-500 cursor-zoom-in focus:outline-none focus:ring-4 focus:ring-indigo-500/50 min-h-[200px] flex flex-col items-center justify-center
           ${isZoomed ? 'fixed inset-4 z-[100] p-10 flex flex-col items-center justify-center bg-white/95 dark:bg-slate-950/95 backdrop-blur-md ring-4 ring-indigo-500/20' : 'p-4 md:p-6'}`}
         onClick={() => !isRendering && setIsZoomed(!isZoomed)}
       >
         {isRendering ? (
-          <div className="flex flex-col items-center space-y-4 py-8">
-            <div className="relative">
-               <div className="h-10 w-10 border-4 border-indigo-600/10 border-t-indigo-600 rounded-full animate-spin"></div>
-               <div className="absolute inset-0 bg-indigo-600/5 animate-pulse rounded-full"></div>
+          <div className="flex flex-col items-center space-y-6 py-12 w-full max-w-sm">
+            <div className="relative w-24 h-24 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl shimmer-bg ring-4 ring-indigo-500/5"></div>
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-5 shimmer-bg rounded-lg animate-pulse delay-75"></div>
+              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-5 h-5 shimmer-bg rounded-lg animate-pulse delay-150"></div>
+              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-5 h-5 shimmer-bg rounded-lg animate-pulse delay-200"></div>
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-5 h-5 shimmer-bg rounded-lg animate-pulse delay-300"></div>
+              <div className="absolute inset-0 border-2 border-dashed border-indigo-500/10 rounded-full animate-spin-slow"></div>
             </div>
-            <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em] animate-pulse">Analyzing Logic Structure...</p>
+            
+            <div className="text-center space-y-3">
+              <p className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.3em] animate-pulse">
+                Synthesizing Bridge
+              </p>
+            </div>
           </div>
         ) : (
           <div 
             ref={containerRef} 
             aria-hidden="true"
-            className={`mermaid flex justify-center w-full transition-transform duration-300 ${isZoomed ? 'scale-110 max-h-full' : 'max-h-[400px]'}`}
+            className={`mermaid flex justify-center w-full transition-transform duration-300 overflow-hidden ${isZoomed ? 'scale-110' : 'max-h-[400px]'}`}
             dangerouslySetInnerHTML={{ __html: svg }}
           />
         )}
         
         {!isRendering && (
-          <div className="mt-4 flex items-center justify-center space-x-3">
-            <div className="h-px w-8 bg-slate-200 dark:bg-slate-800" aria-hidden="true"></div>
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest select-none">
-              {isZoomed ? 'Esc to minimize' : 'Conceptual Analysis Map'}
+          <div className="mt-4 flex items-center justify-center space-x-3 w-full">
+            <div className="h-px flex-1 max-w-[40px] bg-slate-200 dark:bg-slate-800" aria-hidden="true"></div>
+            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest select-none whitespace-nowrap">
+              {isZoomed ? 'Esc to minimize' : 'Conceptual Analysis Bridge'}
             </span>
-            <div className="h-px w-8 bg-slate-200 dark:bg-slate-800" aria-hidden="true"></div>
+            <div className="h-px flex-1 max-w-[40px] bg-slate-200 dark:bg-slate-800" aria-hidden="true"></div>
           </div>
         )}
 

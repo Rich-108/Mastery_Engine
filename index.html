@@ -15,6 +15,17 @@
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
             },
+            animation: {
+              'spin-slow': 'spin 8s linear infinite',
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'voice-wave': 'voice-wave 1.2s ease-in-out infinite',
+            },
+            keyframes: {
+              'voice-wave': {
+                '0%, 100%': { height: '8px' },
+                '50%': { height: '24px' },
+              }
+            }
           },
         },
       }
@@ -56,12 +67,81 @@
         .dark .mermaid svg {
             filter: brightness(0.9) contrast(1.1);
         }
+
+        /* Shimmer loading effect */
+        .shimmer-bg {
+          position: relative;
+          overflow: hidden;
+          background-color: #f1f5f9;
+        }
+        .dark .shimmer-bg {
+          background-color: #1e293b;
+        }
+        .shimmer-bg::after {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          transform: translateX(-100%);
+          background-image: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0) 0,
+            rgba(255, 255, 255, 0.2) 20%,
+            rgba(255, 255, 255, 0.5) 60%,
+            rgba(255, 255, 255, 0)
+          );
+          animation: shimmer 2s infinite;
+          content: '';
+        }
+        .dark .shimmer-bg::after {
+          background-image: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0) 0,
+            rgba(255, 255, 255, 0.05) 20%,
+            rgba(255, 255, 255, 0.1) 60%,
+            rgba(255, 255, 255, 0)
+          );
+        }
+        @keyframes shimmer {
+          100% { transform: translateX(100%); }
+        }
+
+        /* Print Media Styles for High-Quality PDF Export */
+        @media print {
+            header, footer, .no-print, button, .sidebar-overlay, .modal-backdrop, select {
+                display: none !important;
+            }
+            body, .bg-slate-50, .dark .bg-slate-950 {
+                background: white !important;
+                color: black !important;
+            }
+            .max-w-4xl {
+                max-width: 100% !important;
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            main {
+                overflow: visible !important;
+                height: auto !important;
+                padding: 0 !important;
+            }
+            .chat-message {
+                page-break-inside: avoid;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .mermaid {
+                page-break-inside: avoid;
+            }
+        }
     </style>
 <script type="importmap">
 {
   "imports": {
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "groq-sdk": "https://esm.sh/groq-sdk@^0.15.0",
+    "@google/genai": "https://esm.sh/@google/genai@^0.12.0",
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "mermaid": "https://esm.sh/mermaid@11.4.1"

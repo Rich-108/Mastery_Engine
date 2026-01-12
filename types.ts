@@ -9,6 +9,7 @@ export interface FileData {
 export interface GlossaryItem {
   id: string;
   term: string;
+  subject: string; // New field for categorization
   definition: string;
   timestamp: Date;
 }

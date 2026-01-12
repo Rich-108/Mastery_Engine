@@ -1,15 +1,9 @@
 
-import Groq from "groq-sdk";
+import { GoogleGenAI, Modality } from "@google/genai";
 import { FileData } from "../types";
 
-/**
- * Helper to sleep for a specific duration (ms) for exponential backoff.
- */
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Wraps a function with automatic retry logic using exponential backoff.
- */
 const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promise<T> => {
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -17,10 +11,8 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promi
       return await fn();
     } catch (error: any) {
       lastError = error;
-      // Groq specific rate limit handling (Status 429) or server errors
       if (error.status === 429 || error.status >= 500) {
         const waitTime = Math.pow(2, attempt) * 1000;
-        console.warn(`Mastery Engine (Groq): Service busy. Retrying in ${waitTime}ms...`);
         await sleep(waitTime);
         continue;
       }
@@ -30,102 +22,94 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promi
   throw lastError;
 };
 
-/**
- * Core function to interface with Groq API.
- * Replaces Gemini implementation with Groq SDK.
- */
 export const getGeminiResponse = async (
   userMessage: string, 
   history: { role: 'user' | 'assistant', content: string }[],
   attachment?: FileData,
-  modelName: string = 'llama-3.3-70b-versatile'
+  modelName: string = 'gemini-3-pro-preview',
+  useThinking: boolean = false
 ) => {
-  // Always use a vision-capable model if an attachment is provided
-  const effectiveModel = attachment ? 'llama-3.2-11b-vision-preview' : modelName;
-  
-  const groq = new Groq({ 
-    apiKey: process.env.API_KEY,
-    dangerouslyAllowBrowser: true
-  });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   return withRetry(async () => {
-    const messages: any[] = [
-      {
-        role: "system",
-        content: `You are Mastery Engine, a world-class conceptual tutor.
-        
-        PEDAGOGICAL MANDATE:
-        If a student asks a question, you MUST first explain the underlying CONCEPT and foundational logic. 
-        Do not provide raw answers without establishing theoretical mastery first.
-        
-        RESPONSE STRUCTURE:
-        1. THE CORE PRINCIPLE: Explain the foundational "why" of the topic.
-        2. AN ANALOGY: Provide a simple, relatable mental model.
-        3. THE APPLICATION: Step-by-step logic or solution.
-        4. CONCEPT MAP: A Mermaid diagram visualizing the concept relationships.
-        
-        CONSTRAINTS:
-        - USE ALL CAPS for these 4 headers.
-        - Avoid excessive bolding or complex markdown.
-        - End with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`
-      }
-    ];
+    const formattedHistory = history.map(h => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.content }]
+    }));
 
-    // Add conversation history
-    history.forEach(h => {
-      messages.push({
-        role: h.role,
-        content: h.content
-      });
-    });
+    const contents = [...formattedHistory];
+    const parts: any[] = [{ text: userMessage }];
 
-    // Add current message with potential attachment
     if (attachment) {
-      messages.push({
-        role: "user",
-        content: [
-          { type: "text", text: userMessage || "Analyze this image conceptually." },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${attachment.mimeType};base64,${attachment.data}`
-            }
-          }
-        ]
-      });
-    } else {
-      messages.push({
-        role: "user",
-        content: userMessage
+      parts.push({
+        inlineData: {
+          data: attachment.data,
+          mimeType: attachment.mimeType
+        }
       });
     }
 
-    const completion = await groq.chat.completions.create({
-      messages,
-      model: effectiveModel,
-      temperature: 0.7,
-      max_tokens: 4096,
-      top_p: 1,
-      stream: false,
+    contents.push({ role: 'user', parts });
+
+    // Determine config based on model type and thinking flag
+    const isLite = modelName.includes('lite');
+    const actualModel = useThinking ? 'gemini-3-pro-preview' : modelName;
+
+    const response = await ai.models.generateContent({
+      model: actualModel,
+      contents,
+      config: {
+        systemInstruction: `You are Mastery Engine, a world-class conceptual tutor. 
+        
+        GOAL: Your primary mission is to ensure the user truly masters the "Why" behind any topic through deep learning.
+        
+        STRICT FORMATTING RULE:
+        - DO NOT USE asterisks (*) or hash symbols (#) in your responses.
+        - NO Markdown formatting for bold, italics, or headers using those symbols.
+        - Use plain text only. Use capitalization for emphasis if necessary.
+        
+        INSTRUCTIONS:
+        1. CONCEPT FIRST: Whenever a user asks a question OR says hello, always provide a foundational conceptual perspective first. If a user says "hi" or "hello", briefly explain the fundamental concept of inquiry, curiosity, or the nature of mental models before asking what they want to learn.
+        2. ANALOGIES: Use clear, relatable analogies to bridge the gap between abstract ideas and common knowledge.
+        3. VISUALS: Use Mermaid diagrams (code blocks starting with \`\`\`mermaid) to visualize processes, hierarchies, or relationships whenever helpful.
+        4. NATURAL LANGUAGE: Avoid unnecessary symbols, operators, or complex technical jargon unless essential. Speak naturally and clearly.
+        5. DEEP LEARNING NODES: Always end your response with a list of suggested deep-dives using the exact phrase DEEP_LEARNING_TOPICS followed by the topics separated by commas. Do not use any special characters in the list.
+        
+        Example: DEEP_LEARNING_TOPICS Quantum State, Wave Function, Probability Density`,
+        temperature: 0.7,
+        // Apply thinking budget if explicitly requested or for Pro model
+        ...(useThinking ? { thinkingConfig: { thinkingBudget: 32768 } } : 
+           (isLite ? { thinkingConfig: { thinkingBudget: 0 } } : {})),
+      },
     });
 
-    const responseText = completion.choices[0]?.message?.content;
-    if (!responseText) throw new Error("Groq response was empty. Please check connection.");
-    return responseText;
+    const text = response.text;
+    if (!text) throw new Error("Connection interrupted. Please try again.");
+    return text;
   });
 };
 
-/**
- * Strips UI elements for TTS.
- */
+export const getGeminiTTS = async (text: string, voiceName: string = 'Kore') => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName },
+        },
+      },
+    },
+  });
+  return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+};
+
 export const prepareSpeechText = (text: string): string => {
   return text
-    .replace(/```mermaid[\s\S]*?```/g, '')
-    .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '')
+    .replace(/```mermaid[\s\S]*?```/g, 'Visual diagram follows.')
+    .replace(/DEEP_LEARNING_TOPICS[\s\S]*?$/g, '')
     .replace(/[#*`]/g, '')
-    .replace(/1\. THE CORE PRINCIPLE:/g, 'The core principle.')
-    .replace(/2\. AN ANALOGY:/g, 'As an analogy.')
-    .replace(/3\. THE APPLICATION:/g, 'Here is the application.')
-    .replace(/4\. CONCEPT MAP:/g, '')
     .trim();
 };
