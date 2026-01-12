@@ -1,34 +1,14 @@
 
-import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
+import Groq from "groq-sdk";
 import { FileData } from "../types";
 
 /**
- * Maps technical API errors to student-friendly academic feedback.
- */
-const mapErrorToUserMessage = (error: any): string => {
-  const errorMessage = error?.message?.toLowerCase() || "";
-  
-  if (errorMessage.includes("429") || errorMessage.includes("rate limit")) {
-    return "The Engine is at maximum capacity after several attempts. Please pause for 10 seconds and try your inquiry again.";
-  }
-  if (errorMessage.includes("safety") || errorMessage.includes("blocked")) {
-    return "This inquiry was filtered for academic safety. Please focus on subject exploration.";
-  }
-  if (errorMessage.includes("api key") || errorMessage.includes("invalid") || errorMessage.includes("401") || errorMessage.includes("403")) {
-    return "Portal authorization failed. Please check your connection or API configuration.";
-  }
-  
-  return "The Mastery Engine encountered a connectivity issue. Your session is preserved; please retry the last request.";
-};
-
-/**
- * Helper to sleep for a specific duration (ms)
+ * Helper to sleep for a specific duration (ms) for exponential backoff.
  */
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Wraps a function with automatic retry logic using exponential backoff.
- * Specifically handles 429 (Rate Limit) and 500 (Server Error).
  */
 const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promise<T> => {
   let lastError: any;
@@ -37,110 +17,115 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promi
       return await fn();
     } catch (error: any) {
       lastError = error;
-      const isRateLimit = error.message?.includes("429") || error.message?.toLowerCase().includes("rate limit");
-      const isServerError = error.message?.includes("500") || error.message?.includes("503");
-
-      if (isRateLimit || isServerError) {
-        // Calculate wait time: 1s, 2s, 4s...
+      // Groq specific rate limit handling (Status 429) or server errors
+      if (error.status === 429 || error.status >= 500) {
         const waitTime = Math.pow(2, attempt) * 1000;
-        console.warn(`Mastery Engine: High load detected. Retrying in ${waitTime}ms... (Attempt ${attempt + 1}/${maxRetries})`);
+        console.warn(`Mastery Engine (Groq): Service busy. Retrying in ${waitTime}ms...`);
         await sleep(waitTime);
         continue;
       }
-      // If it's a non-retryable error (like safety or 401), throw immediately
       throw error;
     }
   }
   throw lastError;
 };
 
-const trimHistory = (history: { role: 'user' | 'model', parts: { text: string }[] }[], limit: number = 25) => {
-  return history.length <= limit ? history : history.slice(-limit);
-};
-
+/**
+ * Core function to interface with Groq API.
+ * Replaces Gemini implementation with Groq SDK.
+ */
 export const getGeminiResponse = async (
   userMessage: string, 
-  history: { role: 'user' | 'model', parts: { text: string }[] }[],
+  history: { role: 'user' | 'assistant', content: string }[],
   attachment?: FileData,
-  modelName: string = 'gemini-3-flash-preview'
+  modelName: string = 'llama-3.3-70b-versatile'
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Always use a vision-capable model if an attachment is provided
+  const effectiveModel = attachment ? 'llama-3.2-11b-vision-preview' : modelName;
+  
+  const groq = new Groq({ 
+    apiKey: process.env.API_KEY,
+    dangerouslyAllowBrowser: true
+  });
   
   return withRetry(async () => {
-    const userParts: any[] = [{ text: userMessage }];
-    
+    const messages: any[] = [
+      {
+        role: "system",
+        content: `You are Mastery Engine, a world-class conceptual tutor.
+        
+        PEDAGOGICAL MANDATE:
+        If a student asks a question, you MUST first explain the underlying CONCEPT and foundational logic. 
+        Do not provide raw answers without establishing theoretical mastery first.
+        
+        RESPONSE STRUCTURE:
+        1. THE CORE PRINCIPLE: Explain the foundational "why" of the topic.
+        2. AN ANALOGY: Provide a simple, relatable mental model.
+        3. THE APPLICATION: Step-by-step logic or solution.
+        4. CONCEPT MAP: A Mermaid diagram visualizing the concept relationships.
+        
+        CONSTRAINTS:
+        - USE ALL CAPS for these 4 headers.
+        - Avoid excessive bolding or complex markdown.
+        - End with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`
+      }
+    ];
+
+    // Add conversation history
+    history.forEach(h => {
+      messages.push({
+        role: h.role,
+        content: h.content
+      });
+    });
+
+    // Add current message with potential attachment
     if (attachment) {
-      userParts.push({
-        inlineData: {
-          data: attachment.data,
-          mimeType: attachment.mimeType
-        }
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage || "Analyze this image conceptually." },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${attachment.mimeType};base64,${attachment.data}`
+            }
+          }
+        ]
+      });
+    } else {
+      messages.push({
+        role: "user",
+        content: userMessage
       });
     }
 
-    const trimmedHistory = trimHistory(history);
-
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: modelName,
-      contents: [
-        ...trimmedHistory,
-        { role: 'user', parts: userParts }
-      ],
-      config: {
-        systemInstruction: `You are Mastery Engine, a conceptual tutor.
-        
-        PEDAGOGICAL MANDATE:
-        If a student asks a question about a subject, NEVER provide just the answer. 
-        Instead, you MUST first explain the underlying CONCEPT and foundational principles.
-        
-        GREETING PROTOCOL:
-        If the input is a greeting, respond with 1 warm sentence confirming your readiness to help.
-        
-        SUBJECT INQUIRY PROTOCOL:
-        Use this structure for all academic topics:
-        1. THE CORE PRINCIPLE: The logical "why" behind the topic.
-        2. AN ANALOGY: Compare the concept to an everyday object or experience.
-        3. THE APPLICATION: Walk through the solution or explanation step-by-step.
-        4. CONCEPT MAP: If process-oriented, provide a Mermaid diagram.
-        
-        STYLING CONSTRAINTS:
-        - NO markdown symbols like #, *, **, _, >.
-        - USE ALL CAPS for the 4 section headers above.
-        - Double line breaks between paragraphs.
-        - End with: [RELATED_TOPICS: Topic A, Topic B, Topic C]`,
-        temperature: 0.7,
-      },
+    const completion = await groq.chat.completions.create({
+      messages,
+      model: effectiveModel,
+      temperature: 0.7,
+      max_tokens: 4096,
+      top_p: 1,
+      stream: false,
     });
 
-    return response.text || "No response generated.";
+    const responseText = completion.choices[0]?.message?.content;
+    if (!responseText) throw new Error("Groq response was empty. Please check connection.");
+    return responseText;
   });
 };
 
-export const generateSpeech = async (text: string): Promise<string | undefined> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  return withRetry(async () => {
-    const cleanText = text
-      .replace(/```mermaid[\s\S]*?```/g, '')
-      .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '')
-      .replace(/[#*`]/g, '')
-      .trim();
-
-    if (!cleanText) return undefined;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: cleanText }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
-          },
-        },
-      },
-    });
-
-    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  }, 2); // Less retries for audio to prioritize speed
+/**
+ * Strips UI elements for TTS.
+ */
+export const prepareSpeechText = (text: string): string => {
+  return text
+    .replace(/```mermaid[\s\S]*?```/g, '')
+    .replace(/\[RELATED_TOPICS:[\s\S]*?\]/g, '')
+    .replace(/[#*`]/g, '')
+    .replace(/1\. THE CORE PRINCIPLE:/g, 'The core principle.')
+    .replace(/2\. AN ANALOGY:/g, 'As an analogy.')
+    .replace(/3\. THE APPLICATION:/g, 'Here is the application.')
+    .replace(/4\. CONCEPT MAP:/g, '')
+    .trim();
 };
