@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { Message } from '../types';
 import { prepareSpeechText, getGeminiTTS } from '../services/geminiService';
@@ -118,6 +119,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const sections = text.split(/(1\.\sTHE\sCORE\sPRINCIPLE|2\.\sMENTAL\sMODEL\s\(ANALOGY\)|3\.\sTHE\sDIRECT\sANSWER|4\.\sCONCEPT\sMAP)/g);
     
     let isMapSection = false;
+    let isCorePrinciple = false;
 
     return sections.map((part, i) => {
       const trimmed = part.trim();
@@ -126,15 +128,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       // Handle Headers
       if (trimmed.match(/^[1-4]\.\s[A-Z\s()]+/)) {
         isMapSection = trimmed.includes('CONCEPT MAP');
+        isCorePrinciple = trimmed.includes('CORE PRINCIPLE');
         return (
           <div key={i} className="mt-6 mb-4 flex items-center space-x-2 group/header">
-            <span className="flex-shrink-0 h-5 w-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[9px] font-black flex items-center justify-center border border-indigo-200 dark:border-indigo-800">
+            <span className={`flex-shrink-0 h-5 w-5 rounded-md text-[9px] font-black flex items-center justify-center border ${
+              isCorePrinciple 
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-500/20' 
+                : 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
+            }`}>
               {trimmed.charAt(0)}
             </span>
-            <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest group-hover/header:text-indigo-500 transition-colors">
+            <h4 className={`text-[10px] font-black uppercase tracking-widest transition-colors ${
+              isCorePrinciple 
+                ? 'text-indigo-600 dark:text-indigo-400' 
+                : 'text-slate-400 dark:text-slate-500 group-hover/header:text-indigo-500'
+            }`}>
               {trimmed.substring(3)}
             </h4>
-            <div className="flex-1 h-px bg-slate-100 dark:bg-slate-800/50"></div>
+            <div className={`flex-1 h-px ${isCorePrinciple ? 'bg-indigo-100 dark:bg-indigo-900/30' : 'bg-slate-100 dark:bg-slate-800/50'}`}></div>
           </div>
         );
       }
@@ -146,7 +157,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
       // Regular Text
       return (
-        <div key={i} className="whitespace-pre-wrap leading-relaxed mb-4 last:mb-0 text-[12px] md:text-[13.5px] font-medium text-slate-700 dark:text-slate-300">
+        <div 
+          key={i} 
+          className={`whitespace-pre-wrap leading-relaxed mb-4 last:mb-0 text-[12px] md:text-[13.5px] font-medium transition-all duration-500 ${
+            isCorePrinciple 
+              ? 'text-slate-900 dark:text-slate-100 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 rounded-2xl border border-indigo-50/50 dark:border-indigo-900/10 shadow-inner' 
+              : 'text-slate-700 dark:text-slate-300'
+          }`}
+        >
           {trimmed}
         </div>
       );

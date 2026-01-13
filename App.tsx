@@ -61,6 +61,7 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const lastFinalTranscriptRef = useRef<string>('');
 
   const handleEnter = () => {
     setHasEntered(true);
@@ -191,25 +192,37 @@ const App: React.FC = () => {
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
+    lastFinalTranscriptRef.current = input;
+
     recognition.onstart = () => setIsRecording(true);
     recognition.onresult = (event: any) => {
+      let interimTranscript = '';
       let finalTranscript = '';
+
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
         }
       }
+
+      // We combine the text before recording with the new final results and current interim results
+      const combined = (lastFinalTranscriptRef.current + ' ' + finalTranscript + ' ' + interimTranscript).replace(/\s+/g, ' ').trim();
+      setInput(combined);
+      
       if (finalTranscript) {
-        setInput(prev => (prev + ' ' + finalTranscript).trim());
+          lastFinalTranscriptRef.current = (lastFinalTranscriptRef.current + ' ' + finalTranscript).replace(/\s+/g, ' ').trim();
       }
     };
+
     recognition.onerror = (event: any) => {
-      // Gracefully handle 'no-speech' error without a console log
       if (event.error !== 'no-speech') {
         console.warn('Speech recognition status:', event.error);
       }
       stopVoiceTranscription();
     };
+
     recognition.onend = () => setIsRecording(false);
 
     recognitionRef.current = recognition;
@@ -351,7 +364,7 @@ const App: React.FC = () => {
                 type="text" 
                 value={input} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder={isRecording ? "Listening to your subject..." : "Ask about a subject or concept..."} 
+                placeholder={isRecording ? "Listening to your subject..." : "Enter a subject to deconstruct into concepts..."} 
                 className={`w-full border rounded-2xl px-5 py-3.5 pr-24 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[12px] md:text-[14px] font-medium transition-all
                   ${isRecording ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/20' : 'bg-slate-50 dark:bg-slate-800'}
                 `} 
