@@ -22,6 +22,14 @@ export interface Message {
   attachment?: FileData;
 }
 
+// Added SavedSession interface to resolve compilation errors
+export interface SavedSession {
+  id: string;
+  title: string;
+  timestamp: Date;
+  messages: Message[];
+}
+
 export interface ChatState {
   messages: Message[];
   isLoading: boolean;

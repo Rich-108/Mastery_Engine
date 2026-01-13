@@ -1,6 +1,6 @@
 {
   "name": "Mastery Engine",
-  "description": "An AI-powered conceptual tutor that breaks down complex subjects into fundamental principles, powered by Gemini 3 Pro.",
+  "description": "An elite AI-powered conceptual architect that decomposes complex subjects into first principles, analogies, and hierarchical maps, optimized for Gemini 3 Flash.",
   "requestFramePermissions": [
     "microphone"
   ]

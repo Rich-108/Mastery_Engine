@@ -1,7 +1,5 @@
-
 import React, { useState, useRef } from 'react';
 import { Message } from '../types';
-import Diagram from './Diagram';
 import { prepareSpeechText, getGeminiTTS } from '../services/geminiService';
 import { decode, decodeAudioData } from '../utils/audio';
 
@@ -9,12 +7,42 @@ interface ChatMessageProps {
   message: Message;
   onSelectTopic?: (topic: string) => void;
   onRefineConcept?: (lens: string) => void;
-  onHarvestConcept?: (term: string) => void;
+  onHarvestConcept?: (content: string) => void;
   isDarkMode?: boolean;
 }
 
 const sanitizeText = (text: string) => {
   return text.replace(/DEEP_LEARNING_TOPICS[\s\S]*?$/g, '').trim();
+};
+
+const SimpleFlow: React.FC<{ text: string }> = ({ text }) => {
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  
+  return (
+    <div className="my-6 space-y-3 pl-2 border-l-2 border-indigo-100 dark:border-indigo-900/30">
+      {lines.map((line, i) => {
+        const indentLevel = Math.max(0, Math.floor(line.search(/\S/) / 2));
+        const content = line.trim().replace(/^->\s*/, '');
+        
+        return (
+          <div 
+            key={i} 
+            className="flex items-center space-x-2 group animate-in slide-in-from-left duration-500"
+            style={{ marginLeft: `${indentLevel * 0.75}rem`, transitionDelay: `${i * 80}ms` }}
+          >
+            {indentLevel > 0 && (
+              <svg className="w-3 h-3 text-indigo-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+              </svg>
+            )}
+            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-[10px] md:text-[12px] font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all hover:border-indigo-400 hover:shadow-md hover:bg-white dark:hover:bg-slate-800">
+              {content}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 };
 
 const ChatMessage: React.FC<ChatMessageProps> = ({ 
@@ -26,7 +54,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 }) => {
   const isAssistant = message.role === 'assistant';
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -34,7 +61,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const handleCopy = async () => {
     try {
       const cleanContent = message.content
-        .replace(/```mermaid[\s\S]*?```/g, '[Diagram]')
         .replace(/DEEP_LEARNING_TOPICS[\s\S]*?$/g, '');
       await navigator.clipboard.writeText(cleanContent);
       setCopied(true);
@@ -89,86 +115,113 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const mainContent = sanitizeText(message.content);
 
   const renderContent = (text: string) => {
-    const parts = text.split(/(```mermaid[\s\S]*?```)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('```mermaid')) {
-        const chart = part.replace(/```mermaid/g, '').replace(/```/g, '').trim();
-        return <Diagram key={i} chart={chart} isDarkMode={isDarkMode} />;
+    const sections = text.split(/(1\.\sTHE\sCORE\sPRINCIPLE|2\.\sMENTAL\sMODEL\s\(ANALOGY\)|3\.\sTHE\sDIRECT\sANSWER|4\.\sCONCEPT\sMAP)/g);
+    
+    let isMapSection = false;
+
+    return sections.map((part, i) => {
+      const trimmed = part.trim();
+      if (!trimmed) return null;
+
+      // Handle Headers
+      if (trimmed.match(/^[1-4]\.\s[A-Z\s()]+/)) {
+        isMapSection = trimmed.includes('CONCEPT MAP');
+        return (
+          <div key={i} className="mt-6 mb-4 flex items-center space-x-2 group/header">
+            <span className="flex-shrink-0 h-5 w-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[9px] font-black flex items-center justify-center border border-indigo-200 dark:border-indigo-800">
+              {trimmed.charAt(0)}
+            </span>
+            <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest group-hover/header:text-indigo-500 transition-colors">
+              {trimmed.substring(3)}
+            </h4>
+            <div className="flex-1 h-px bg-slate-100 dark:bg-slate-800/50"></div>
+          </div>
+        );
       }
-      return <div key={i} className="whitespace-pre-wrap leading-relaxed mb-4 last:mb-0">{part}</div>;
+
+      // Special rendering for Concept Map content
+      if (isMapSection) {
+        return <SimpleFlow key={i} text={trimmed} />;
+      }
+
+      // Regular Text
+      return (
+        <div key={i} className="whitespace-pre-wrap leading-relaxed mb-4 last:mb-0 text-[12px] md:text-[13.5px] font-medium text-slate-700 dark:text-slate-300">
+          {trimmed}
+        </div>
+      );
     });
   };
 
   return (
-    <div className={`flex w-full mb-8 ${isAssistant ? 'justify-start' : 'justify-end'}`}>
-      <div className={`flex max-w-[95%] md:max-w-[85%] ${isAssistant ? 'flex-row' : 'flex-row-reverse'}`}>
-        <div className={`flex-shrink-0 h-10 w-10 rounded-2xl flex items-center justify-center text-white font-bold text-xs shadow-lg transition-all mt-1 ${isAssistant ? 'bg-indigo-600 mr-4' : 'bg-slate-500 ml-4'}`}>
+    <div className={`flex w-full mb-8 md:mb-12 ${isAssistant ? 'justify-start' : 'justify-end'}`}>
+      <div className={`flex max-w-[95%] md:max-w-[88%] ${isAssistant ? 'flex-row' : 'flex-row-reverse'}`}>
+        <div className={`flex-shrink-0 h-8 w-8 md:h-10 md:w-10 rounded-lg md:rounded-xl flex items-center justify-center shadow-lg transform transition-transform hover:rotate-6 mt-1 ${isAssistant ? 'bg-indigo-600 mr-3 md:mr-4 shadow-indigo-500/20' : 'bg-slate-700 ml-3 md:ml-4 shadow-slate-500/10'}`}>
           {isAssistant ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-          ) : 'U'}
+            <svg className="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          ) : <span className="text-white text-[8px] md:text-[10px] font-bold uppercase tracking-tighter">User</span>}
         </div>
+        
         <div className={`flex flex-col ${isAssistant ? 'items-start' : 'items-end'}`}>
-          <div className={`relative px-6 py-5 rounded-[2rem] text-[15px] shadow-sm border transition-all duration-300 ${isAssistant ? 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-100 dark:border-slate-800 rounded-tl-none' : 'bg-indigo-600 text-white border-indigo-500 rounded-tr-none'}`}>
+          <div className={`relative px-5 py-6 md:px-10 md:py-10 rounded-[1.5rem] md:rounded-[2.5rem] shadow-xl md:shadow-2xl border transition-all duration-300 ${isAssistant ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-tl-none' : 'bg-indigo-600 text-white border-indigo-500 rounded-tr-none'}`}>
             <div className="max-w-none">
-              {message.attachment && <div className="mb-4"><img src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} className="max-w-full rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 max-h-80 object-contain" alt="User upload" /></div>}
+              {message.attachment && <div className="mb-6"><img src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} className="max-w-full rounded-xl md:rounded-[2rem] shadow-xl border border-white dark:border-slate-800" alt="Context" /></div>}
               {renderContent(mainContent)}
             </div>
 
             {isAssistant && (
-              <div className="mt-6 pt-5 border-t border-slate-50 dark:border-slate-800 space-y-4">
+              <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800/50 space-y-6">
                 {topics.length > 0 && (
                   <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Deep Learning Nodes</span>
-                    <nav className="flex flex-wrap gap-2">
+                    <div className="flex items-center space-x-2 mb-4">
+                      <div className="h-1 w-1 rounded-full bg-indigo-500"></div>
+                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest font-display">Deep Learning Nodes</span>
+                    </div>
+                    <nav className="flex flex-wrap gap-2 md:gap-4">
                       {topics.map((topic, i) => (
-                        <div key={i} className="flex items-center bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden group/topic hover:border-indigo-500 transition-all">
-                          <button onClick={() => onSelectTopic?.(topic)} className="px-3 py-1.5 text-slate-500 dark:text-slate-400 text-[11px] font-bold hover:bg-indigo-600 hover:text-white transition-all">
-                            {topic}
-                          </button>
-                          <button 
-                            onClick={() => onHarvestConcept?.(topic)}
-                            title="Harvest to Mastery Hub"
-                            className="p-1.5 border-l border-slate-200 dark:border-slate-700 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                          </button>
-                        </div>
+                        <button 
+                          key={i} 
+                          onClick={() => onSelectTopic?.(topic)}
+                          className="relative group/node px-3 py-2 md:px-5 md:py-3 rounded-lg md:rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all active:scale-95"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <svg className="w-3 h-3 text-indigo-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            <span className="text-[9px] md:text-[11px] font-black text-slate-600 dark:text-slate-300 group-hover/node:text-indigo-600 dark:group-hover/node:text-indigo-400 uppercase transition-colors">{topic}</span>
+                          </div>
+                        </button>
                       ))}
                     </nav>
                   </div>
                 )}
                 
-                <div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Refine Conceptual Lens</span>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => onRefineConcept?.('First Principles')} className="px-3 py-1.5 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-tighter rounded-xl border border-indigo-100 dark:border-indigo-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center">
-                      <svg className="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex space-x-2">
+                    <button onClick={() => onRefineConcept?.('First Principles')} className="px-3 py-1.5 md:px-4 md:py-2 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 text-[9px] font-black text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all rounded-lg font-display uppercase tracking-widest">
                       Logic
                     </button>
-                    <button onClick={() => onRefineConcept?.('Analogies')} className="px-3 py-1.5 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-tighter rounded-xl border border-indigo-100 dark:border-indigo-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center">
-                      <svg className="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 16l2.879-2.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <button onClick={() => onRefineConcept?.('Analogies')} className="px-3 py-1.5 md:px-4 md:py-2 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 text-[9px] font-black text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all rounded-lg font-display uppercase tracking-widest">
                       Analogy
                     </button>
-                    <button onClick={() => onRefineConcept?.('Visual Mapping')} className="px-3 py-1.5 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-tighter rounded-xl border border-indigo-100 dark:border-indigo-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all flex items-center">
-                      <svg className="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
-                      Bridge
-                    </button>
                   </div>
-                </div>
 
-                <div className="pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <button onClick={() => setFeedback(feedback === 'up' ? null : 'up')} className={`p-1 transition-colors ${feedback === 'up' ? 'text-indigo-600' : 'text-slate-300 hover:text-indigo-400'}`}><svg className="h-4 w-4" fill={feedback === 'up' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path d="M14 10h4.708C19.743 10 20.5 10.842 20.5 11.854c0 .487-.194.948-.533 1.287l-6.039 6.039a2.103 2.103 0 01-1.487.616H8.5c-1.105 0-2-.895-2-2v-7c0-.53.21-1.04.586-1.414l4.828-4.828a2 2 0 012.828 0c.2.2.343.435.414.69l.844 3.376c.07.28.07.56.07.842V10z" /></svg></button>
-                    <button onClick={handleToggleSpeech} disabled={isSpeaking && !audioSourceRef.current} className={`p-1 transition-colors ${isSpeaking ? 'text-indigo-600 animate-pulse' : 'text-slate-300 hover:text-indigo-500'} disabled:opacity-20`} title="Listen to explanation">
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                  <div className="flex items-center space-x-4 ml-auto sm:ml-0">
+                    <button onClick={() => onHarvestConcept?.(mainContent)} className="p-1.5 text-slate-300 hover:text-amber-500 transition-all">
+                      <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+                    </button>
+                    <button onClick={handleToggleSpeech} className={`p-1.5 rounded-lg transition-all ${isSpeaking ? 'text-indigo-600' : 'text-slate-300 hover:text-indigo-500'}`}>
+                      <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                    </button>
+                    <button onClick={handleCopy} className="text-[9px] font-black text-slate-300 hover:text-indigo-600 transition-colors uppercase tracking-widest">
+                      {copied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
-                  <button onClick={handleCopy} className="text-[10px] font-black uppercase text-slate-300 hover:text-indigo-600 tracking-tighter">{copied ? 'Copied' : 'Copy Logic'}</button>
                 </div>
               </div>
             )}
           </div>
-          <time className="text-[9px] text-slate-400 mt-2 uppercase tracking-[0.2em] font-black">{message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+          <time className="text-[8px] font-black text-slate-400 mt-2 font-display uppercase tracking-widest opacity-60">
+            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </time>
         </div>
       </div>
     </div>

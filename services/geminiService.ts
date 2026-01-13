@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Modality } from "@google/genai";
 import { FileData } from "../types";
 
@@ -25,9 +24,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 3): Promi
 export const getGeminiResponse = async (
   userMessage: string, 
   history: { role: 'user' | 'assistant', content: string }[],
-  attachment?: FileData,
-  modelName: string = 'gemini-3-flash-preview',
-  useThinking: boolean = false
+  attachment?: FileData
 ) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -51,39 +48,46 @@ export const getGeminiResponse = async (
 
     contents.push({ role: 'user', parts });
 
-    // Flash has a max thinking budget of 24576
-    const thinkingBudget = 24576;
-    const actualModel = useThinking ? 'gemini-3-flash-preview' : modelName;
-
     const response = await ai.models.generateContent({
-      model: actualModel,
+      model: 'gemini-3-flash-preview',
       contents,
       config: {
-        systemInstruction: `You are Mastery Engine, a world-class conceptual tutor. 
+        systemInstruction: `You are Mastery Engine, an elite conceptual architect for students. 
         
-        GOAL: Your primary mission is to ensure the user truly masters the "Why" behind any topic through deep learning.
-        
-        STRICT FORMATTING RULE:
-        - DO NOT USE asterisks (*) or hash symbols (#) in your responses.
-        - NO Markdown formatting for bold, italics, or headers using those symbols.
-        - Use plain text only. Use capitalization for emphasis if necessary.
-        
-        INSTRUCTIONS:
-        1. CONCEPT FIRST: Whenever a user asks a question OR says hello, always provide a foundational conceptual perspective first. If a user says "hi" or "hello", briefly explain the fundamental concept of inquiry, curiosity, or the nature of mental models before asking what they want to learn.
-        2. ANALOGIES: Use clear, relatable analogies to bridge the gap between abstract ideas and common knowledge.
-        3. VISUALS: Use Mermaid diagrams (code blocks starting with \`\`\`mermaid) to visualize processes, hierarchies, or relationships whenever helpful.
-        4. NATURAL LANGUAGE: Avoid unnecessary symbols, operators, or complex technical jargon unless essential. Speak naturally and clearly.
-        5. DEEP LEARNING NODES: Always end your response with a list of suggested deep-dives using the exact phrase DEEP_LEARNING_TOPICS followed by the topics separated by commas. Do not use any special characters in the list.
-        
-        Example: DEEP_LEARNING_TOPICS Quantum State, Wave Function, Probability Density`,
+        STRICT OPERATING PROTOCOL:
+        When a student asks about a subject, your primary goal is to provide the underlying CONCEPT before the specific answer. 
+        Decompose complexity into first principles.
+
+        STRICT RESPONSE STRUCTURE:
+        1. THE CORE PRINCIPLE
+        [Explain the foundational "why" or logic of the subject in one strong paragraph.]
+
+        2. MENTAL MODEL (ANALOGY)
+        [Provide a vivid analogy that maps this complex subject to a simple everyday experience.]
+
+        3. THE DIRECT ANSWER
+        [Address the specific query with technical precision but conceptual clarity.]
+
+        4. CONCEPT MAP
+        [A text-based hierarchical map using indentation (2 spaces) and arrows (->).
+        Example:
+        Concept
+          -> Primary Component
+             -> Detail 1
+          -> Secondary Component]
+
+        VISUAL STYLE:
+        - Use standard sentence case.
+        - Double line breaks between sections.
+        - Plain text only. No markdown symbols like * or #.
+
+        DEEP_LEARNING_TOPICS: [List 3 advanced sub-topics related to the subject]`,
         temperature: 0.7,
-        ...(useThinking ? { thinkingConfig: { thinkingBudget } } : {}),
       },
     });
 
-    const text = response.text;
-    if (!text) throw new Error("Connection interrupted. Please try again.");
-    return text;
+    const text = response.text || "";
+    return text.replace(/[*#]/g, '').trim();
   });
 };
 
@@ -106,8 +110,7 @@ export const getGeminiTTS = async (text: string, voiceName: string = 'Kore') => 
 
 export const prepareSpeechText = (text: string): string => {
   return text
-    .replace(/```mermaid[\s\S]*?```/g, 'Visual diagram follows.')
     .replace(/DEEP_LEARNING_TOPICS[\s\S]*?$/g, '')
-    .replace(/[#*`]/g, '')
+    .replace(/[0-9]\.\s[A-Z\s]+/g, '') 
     .trim();
 };

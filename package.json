@@ -12,7 +12,8 @@
     "react-dom": "^19.2.3",
     "@google/genai": "^0.12.0",
     "react": "^19.2.3",
-    "mermaid": "11.4.1"
+    "mermaid": "11.4.1",
+    "jspdf": "^2.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

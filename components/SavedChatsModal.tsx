@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { SavedSession } from '../App';
+import { SavedSession } from '../types';
 
 interface SavedChatsModalProps {
   isOpen: boolean;
