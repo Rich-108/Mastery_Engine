@@ -31,6 +31,7 @@ export const getGeminiResponse = async (
   history: { role: 'user' | 'assistant', content: string }[],
   attachment?: FileData
 ) => {
+  // Use process.env.API_KEY directly in the constructor as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   return withRetry(async () => {
@@ -121,6 +122,7 @@ export const getGeminiResponse = async (
 };
 
 export const getGeminiTTS = async (text: string, voiceName: string = 'Kore') => {
+  // Use process.env.API_KEY directly in the constructor as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",
@@ -143,6 +145,6 @@ export const prepareSpeechText = (text: string): string => {
     .replace(/flowchart[\s\S]*?$/gi, '')
     .replace(/graph[\s\S]*?$/gi, '')
     .replace(/[0-9]\.\s[A-Z\s]+/g, '') 
-    .replace(/[*#]/g, '') // Stripping any residual symbols for speech
+    .replace(/[*#]/g, '') 
     .trim();
 };
