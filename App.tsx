@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 const INITIAL_MESSAGE: Message = {
   id: 'welcome',
   role: 'assistant',
-  content: "Welcome to Mastery Engine. I am your Conceptual Architect. Ask any subject or question, and I will deconstruct the underlying logic and concepts before providing the direct answer.",
+  content: "Welcome to Mastery Engine. I am your Conceptual Architect. Ask any question, and I will first deconstruct the underlying principle before providing an answer.",
   timestamp: new Date(),
 };
 
@@ -22,6 +22,11 @@ const ENTRY_KEY = 'mastery_engine_entered';
 
 const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(() => localStorage.getItem(ENTRY_KEY) === 'true');
+  const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
+    const key = process.env.API_KEY;
+    return !!key && key !== "undefined" && key !== "";
+  });
+  
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -285,9 +290,9 @@ const App: React.FC = () => {
       const status = err.status || (err.response ? err.response.status : null);
 
       if (err.message === "MISSING_API_KEY") {
-        errorMessage = "CRITICAL: API Key not detected. To fix this, please ensure you have added the 'API_KEY' environment variable to your Render Dashboard settings and triggered a new manual deployment.";
+        errorMessage = "NEURAL LINK OFFLINE: The API key is not detected in the environment. Please add the 'API_KEY' variable to your Render Dashboard and perform a 'Clear Build Cache & Deploy'.";
       } else if (status === 401 || status === 403) {
-        errorMessage = "CRITICAL: Neural Authorization Failed. The provided API key is invalid. Double check your key at ai.google.dev.";
+        errorMessage = "NEURAL LINK UNAUTHORIZED: The provided API key is invalid or lacks permissions. Check your settings at ai.google.dev.";
       } else if (err.message?.includes('Safety')) {
         errorMessage = "The synthesis path was blocked by safety protocols. Try reframing your subject.";
       } else if (err.message?.includes('timeout')) {
@@ -314,7 +319,15 @@ const App: React.FC = () => {
           <div className="bg-indigo-600 p-1.5 md:p-2 rounded-lg md:rounded-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
             <svg className="h-4 w-4 md:h-6 md:w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
-          <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display hidden xs:block">Mastery Engine</h1>
+          <div className="hidden xs:flex flex-col">
+            <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display">Mastery Engine</h1>
+            <div className="flex items-center space-x-1">
+              <div className={`h-1.5 w-1.5 rounded-full ${isApiKeyValid ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
+              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Neural Bridge: {isApiKeyValid ? 'Synchronized' : 'Offline'}
+              </span>
+            </div>
+          </div>
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
@@ -337,10 +350,6 @@ const App: React.FC = () => {
                 </button>
                 <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
                   <span className="w-2 h-2 rounded-full bg-slate-400 mr-2"></span> Export as Plain Text
-                </button>
-                <div className="h-px bg-slate-100 dark:bg-slate-700 my-1"></div>
-                <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-2 text-[9px] md:text-[10px] font-bold text-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                   Raw Archive (.json)
                 </button>
               </div>
             )}

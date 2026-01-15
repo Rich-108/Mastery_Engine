@@ -89,7 +89,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const mainContent = sanitizeText(message.content);
 
   const renderContent = (text: string) => {
-    const sections = text.split(/(1\.\sTHE\sCORE\sPRINCIPLE|2\.\sMENTAL\sMODEL\s\(ANALOGY\)|3\.\sTHE\sDIRECT\sANSWER|4\.\sCONCEPT\sMAP)/g);
+    const sections = text.split(/(1\.\sTHE\sCORE\sPRINCIPLE|2\.\sMENTAL\sMODEL\s\(ANALOGY\)|3\.\sDIRECT\sANALYSIS|3\.\sTHE\sDIRECT\sANSWER|4\.\sCONCEPT\sMAP)/g);
     
     let isMapSection = false;
     let isCoreSection = false;
@@ -135,11 +135,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           key={i} 
           className={`whitespace-pre-wrap leading-relaxed mb-5 md:mb-8 last:mb-0 text-[11px] md:text-[16px] font-medium transition-all duration-500 ${
             isCoreSection 
-              ? 'text-slate-900 dark:text-slate-100 bg-indigo-50/10 dark:bg-indigo-950/20 p-5 md:p-10 rounded-[1.5rem] md:rounded-[3.5rem] border border-indigo-100/20 dark:border-indigo-900/10 shadow-inner' 
+              ? 'text-slate-900 dark:text-slate-100 bg-indigo-50/20 dark:bg-indigo-950/20 p-6 md:p-12 rounded-[1.5rem] md:rounded-[4rem] border border-indigo-200 dark:border-indigo-800/50 shadow-inner relative overflow-hidden' 
               : 'text-slate-700 dark:text-slate-300'
           }`}
         >
-          {trimmed}
+          {isCoreSection && (
+            <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#4f46e5 1px, transparent 1px)', backgroundSize: '15px 15px' }}></div>
+          )}
+          <span className="relative z-10">{trimmed}</span>
         </div>
       );
     });
