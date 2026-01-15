@@ -14,6 +14,8 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 2): Promi
       return await Promise.race([fn(), timeoutPromise]) as T;
     } catch (error: any) {
       lastError = error;
+      console.error(`Attempt ${attempt + 1} failed:`, error);
+      
       const status = error.status || (error.response ? error.response.status : null);
       if (status === 429 || (status && status >= 500)) {
         const waitTime = Math.pow(2, attempt) * 1000;
@@ -31,13 +33,16 @@ export const getGeminiResponse = async (
   history: { role: 'user' | 'assistant', content: string }[],
   attachment?: FileData
 ) => {
-  // Use process.env.API_KEY directly in the constructor as per guidelines
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") {
+    throw new Error("MISSING_API_KEY");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   return withRetry(async () => {
     const contents: any[] = [];
     
-    // Process and Sanitize History to ensure strictly alternating turns (U-M-U-M)
     history.forEach((h) => {
       const role = h.role === 'assistant' ? 'model' : 'user';
       const text = (h.content || "").trim();
@@ -46,10 +51,7 @@ export const getGeminiResponse = async (
       if (contents.length > 0 && contents[contents.length - 1].role === role) {
         contents[contents.length - 1].parts[0].text += "\n\n" + text;
       } else {
-        contents.push({
-          role,
-          parts: [{ text }]
-        });
+        contents.push({ role, parts: [{ text }] });
       }
     });
 
@@ -57,10 +59,7 @@ export const getGeminiResponse = async (
     if (userMessage.trim()) currentParts.push({ text: userMessage.trim() });
     if (attachment) {
       currentParts.push({
-        inlineData: {
-          data: attachment.data,
-          mimeType: attachment.mimeType
-        }
+        inlineData: { data: attachment.data, mimeType: attachment.mimeType }
       });
     }
 
@@ -70,69 +69,61 @@ export const getGeminiResponse = async (
       contents.push({ role: 'user', parts: currentParts });
     }
 
-    // API strict requirement: conversation must start with a user turn
     while (contents.length > 0 && contents[0].role !== 'user') {
       contents.shift();
     }
 
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents,
-        config: {
-          systemInstruction: `You are Mastery Engine, an elite conceptual architect. 
-          
-          STRICT OPERATING PROTOCOLS:
-          1. NEVER use asterisks (*) for bold/italic.
-          2. NEVER use hashes (#) for headers.
-          3. Use plain text with the specific numbered sections provided below.
-          4. If a student asks a question, deconstruct the underlying CONCEPT before giving the direct answer.
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview', // Upgraded to Pro for better conceptual depth
+      contents,
+      config: {
+        systemInstruction: `You are Mastery Engine, an elite conceptual architect. 
+        
+        CORE MISSION: 
+        When a student asks about a subject or question, DO NOT just give the answer. 
+        Instead, you MUST first provide the underlying CONCEPT. Deconstruct the logic into first principles.
 
-          STRICT RESPONSE STRUCTURE (Use exactly this plain text format):
-          
-          1. THE CORE PRINCIPLE
-          [A profound paragraph deconstructing the foundational conceptual logic. Use plain text only.]
+        STRICT OPERATING PROTOCOLS:
+        1. NO asterisks (*), NO hashes (#). Use PLAIN TEXT ONLY.
+        2. Use the exact numbered sections below.
+        3. Prioritize conceptual depth over simple answers.
 
-          2. MENTAL MODEL (ANALOGY)
-          [A vivid analogy making the concept concrete. Use plain text only.]
+        RESPONSE STRUCTURE:
+        
+        1. THE CORE PRINCIPLE
+        [Identify the fundamental law or logic that governs this topic. Why does it exist?]
 
-          3. THE DIRECT ANSWER
-          [The precise answer to the student's inquiry. Use plain text only.]
+        2. MENTAL MODEL (ANALOGY)
+        [Explain the concept using a real-world analogy that makes it intuitive.]
 
-          4. CONCEPT MAP
-          [Provide a COMPACT Mermaid flowchart. Max 4-5 nodes.
-          - Start with 'flowchart TD' on its own line.
-          - Use simple IDs like A, B, C.
-          - Wrap node labels in quotes.
-          - Add blank lines for readability.
-          ]
+        3. THE DIRECT ANSWER
+        [Address the student's specific question using the logic established in step 1.]
 
-          EXPANSION_NODES: [Topic 1, Topic 2, Topic 3]`,
-          temperature: 0.7,
-        },
-      });
+        4. CONCEPT MAP
+        [A simple Mermaid flowchart showing the hierarchy of ideas.]
 
-      if (!response || !response.text) throw new Error("Neural synthesis failed to return content.");
-      return response.text.trim();
-    } catch (apiError: any) {
-      console.error("Mastery Engine API Error:", apiError);
-      throw apiError;
-    }
+        EXPANSION_NODES: [Related Concept A, Related Concept B, Related Concept C]`,
+        temperature: 0.6,
+      },
+    });
+
+    if (!response.text) throw new Error("EMPTY_RESPONSE");
+    return response.text.trim();
   });
 };
 
 export const getGeminiTTS = async (text: string, voiceName: string = 'Kore') => {
-  // Use process.env.API_KEY directly in the constructor as per guidelines
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") return null;
+  
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",
     contents: [{ parts: [{ text }] }],
     config: {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName },
-        },
+        voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },
     },
   });

@@ -280,11 +280,19 @@ const App: React.FC = () => {
       }]);
     } catch (err: any) { 
       console.error("Mastery Engine Synthesis Error:", err);
-      const errorMessage = err.message?.includes('Safety') 
-        ? "The synthesis path was blocked by safety protocols. Try reframing your subject."
-        : err.message?.includes('timeout')
-        ? "The neural gateway is experiencing high latency. Please try again."
-        : "A neural synchronization error occurred. Please refresh the connection and try again.";
+      
+      let errorMessage = "A neural synchronization error occurred. Please refresh the connection and try again.";
+      const status = err.status || (err.response ? err.response.status : null);
+
+      if (err.message === "MISSING_API_KEY") {
+        errorMessage = "API Configuration Missing: Please ensure the API_KEY environment variable is set in your Render dashboard.";
+      } else if (status === 401 || status === 403) {
+        errorMessage = "Neural Authorization Failed: The provided API key is invalid or unauthorized for this model.";
+      } else if (err.message?.includes('Safety')) {
+        errorMessage = "The synthesis path was blocked by safety protocols. Try reframing your subject.";
+      } else if (err.message?.includes('timeout')) {
+        errorMessage = "The neural gateway is experiencing high latency. Please try again.";
+      }
         
       setMessages(prev => [...prev, { 
         id: Date.now().toString() + "-err", 
@@ -293,7 +301,6 @@ const App: React.FC = () => {
         timestamp: new Date() 
       }]);
     } finally { 
-      // Ensure loading state is cleared even if error occurs
       setIsLoading(false); 
     }
   };
