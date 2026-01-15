@@ -22,10 +22,16 @@ const ENTRY_KEY = 'mastery_engine_entered';
 
 const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(() => localStorage.getItem(ENTRY_KEY) === 'true');
+  const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'error'>('online');
+  
   const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
     const key = process.env.API_KEY;
     return !!key && key !== "undefined" && key !== "";
   });
+
+  useEffect(() => {
+    if (!isApiKeyValid) setSyncStatus('offline');
+  }, [isApiKeyValid]);
   
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -84,81 +90,19 @@ const App: React.FC = () => {
         const a = document.createElement('a');
         a.href = url;
         a.download = `${filename}.txt`;
-        a.click();
-        break;
-      }
-      case 'json': {
-        const content = JSON.stringify(messages, null, 2);
-        const blob = new Blob([content], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.json`;
-        a.click();
-        break;
-      }
-      case 'word': {
-        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-          <head><meta charset='utf-8'><title>Export</title><style>
-            body { font-family: 'Arial', sans-serif; }
-            .msg { margin-bottom: 20px; padding: 10px; border-bottom: 1px solid #ccc; }
-            .role { font-weight: bold; color: #4338ca; text-transform: uppercase; font-size: 10px; }
-            .time { font-size: 8px; color: #666; }
-            .content { margin-top: 5px; font-size: 11px; white-space: pre-wrap; }
-          </style></head><body><h1>Mastery Engine Export</h1>`;
-        const footer = `</body></html>`;
-        const content = messages.map(m => `
-          <div class="msg">
-            <div class="role">${m.role} <span class="time">(${m.timestamp.toLocaleString()})</span></div>
-            <div class="content">${m.content.replace(/\n/g, '<br/>')}</div>
-          </div>
-        `).join('');
-        const blob = new Blob(['\ufeff', header + content + footer], { type: 'application/msword' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.doc`;
-        a.click();
         break;
       }
       case 'pdf': {
         const doc = new jsPDF();
         doc.setFontSize(16);
         doc.text("Mastery Engine - Conceptual Archive", 10, 20);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text(`Generated on ${new Date().toLocaleString()}`, 10, 25);
-        
         let cursorY = 40;
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const margin = 10;
-        const maxLineWidth = pageWidth - margin * 2;
-
         messages.forEach((m) => {
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(m.role === 'assistant' ? 79 : 51, m.role === 'assistant' ? 70 : 65, m.role === 'assistant' ? 229 : 85);
-          doc.text(`${m.role.toUpperCase()} - ${m.timestamp.toLocaleTimeString()}`, margin, cursorY);
-          cursorY += 5;
-
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(30);
-          const lines = doc.splitTextToSize(m.content, maxLineWidth);
-          
-          if (cursorY + (lines.length * 5) > doc.internal.pageSize.getHeight() - 20) {
-            doc.addPage();
-            cursorY = 20;
-          }
-          
-          doc.text(lines, margin, cursorY);
-          cursorY += (lines.length * 5) + 10;
-          
-          if (cursorY > doc.internal.pageSize.getHeight() - 20) {
-            doc.addPage();
-            cursorY = 20;
-          }
+          const lines = doc.splitTextToSize(`${m.role.toUpperCase()}: ${m.content}`, 180);
+          doc.text(lines, 10, cursorY);
+          cursorY += (lines.length * 7) + 5;
+          if (cursorY > 270) { doc.addPage(); cursorY = 20; }
         });
-
         doc.save(`${filename}.pdf`);
         break;
       }
@@ -168,13 +112,11 @@ const App: React.FC = () => {
 
   const handleHarvestConcept = (content: string) => {
     const lines = content.split('\n').filter(l => l.trim().length > 0);
-    const title = lines[0] || 'New Concept';
-    const definition = lines.slice(1, 4).join(' ') || content;
     const newItem: GlossaryItem = {
       id: Date.now().toString(),
-      term: title.slice(0, 50),
+      term: lines[0]?.slice(0, 50) || 'New Concept',
       subject: "Harvested",
-      definition,
+      definition: lines.slice(1, 4).join(' ') || content,
       timestamp: new Date(),
     };
     setGlossary(prev => {
@@ -188,25 +130,17 @@ const App: React.FC = () => {
   const startVoiceTranscription = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
-
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-
-    lastFinalTranscriptRef.current = input;
-
     recognition.onstart = () => setIsRecording(true);
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
       let finalTranscript = '';
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-        else interimTranscript += event.results[i][0].transcript;
       }
-      const combined = (lastFinalTranscriptRef.current + ' ' + finalTranscript + ' ' + interimTranscript).replace(/\s+/g, ' ').trim();
-      setInput(combined);
-      if (finalTranscript) lastFinalTranscriptRef.current = (lastFinalTranscriptRef.current + ' ' + finalTranscript).replace(/\s+/g, ' ').trim();
+      if (finalTranscript) setInput(prev => (prev + ' ' + finalTranscript).trim());
     };
     recognition.onerror = () => stopVoiceTranscription();
     recognition.onend = () => setIsRecording(false);
@@ -215,10 +149,7 @@ const App: React.FC = () => {
   };
 
   const stopVoiceTranscription = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
+    if (recognitionRef.current) { recognitionRef.current.stop(); recognitionRef.current = null; }
     setIsRecording(false);
   };
 
@@ -236,16 +167,6 @@ const App: React.FC = () => {
     const root = window.document.documentElement;
     if (isDarkMode) root.classList.add('dark'); else root.classList.remove('dark');
   }, [isDarkMode]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (exportButtonRef.current && !exportButtonRef.current.contains(event.target as Node)) {
-        setIsExportMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
@@ -283,26 +204,29 @@ const App: React.FC = () => {
         content: responseText, 
         timestamp: new Date() 
       }]);
+      setSyncStatus('online');
     } catch (err: any) { 
       console.error("Mastery Engine Synthesis Error:", err);
+      setSyncStatus('error');
       
-      let errorMessage = "A neural synchronization error occurred. Please refresh the connection and try again.";
-      const status = err.status || (err.response ? err.response.status : null);
+      let diagnostic = err.message || "Unknown neural interference.";
+      let advice = "Please verify your API key and network connection.";
 
       if (err.message === "MISSING_API_KEY") {
-        errorMessage = "NEURAL LINK OFFLINE: The API key is not detected in the environment. Please add the 'API_KEY' variable to your Render Dashboard and perform a 'Clear Build Cache & Deploy'.";
-      } else if (status === 401 || status === 403) {
-        errorMessage = "NEURAL LINK UNAUTHORIZED: The provided API key is invalid or lacks permissions. Check your settings at ai.google.dev.";
-      } else if (err.message?.includes('Safety')) {
-        errorMessage = "The synthesis path was blocked by safety protocols. Try reframing your subject.";
-      } else if (err.message?.includes('timeout')) {
-        errorMessage = "The neural gateway is experiencing high latency. Please try again.";
+        diagnostic = "API Key not found in environment.";
+        advice = "Ensure 'API_KEY' is set in Render Dashboard and trigger a manual 'Clear Cache & Deploy'.";
+      } else if (err.status === 403 || err.status === 401) {
+        diagnostic = "Access Denied (Invalid Key).";
+        advice = "The key you provided was rejected by Google. Double check at ai.google.dev.";
+      } else if (err.message?.includes('Timeout')) {
+        diagnostic = "Neural Gateway Timeout.";
+        advice = "The server took too long to respond. Try a shorter query.";
       }
         
       setMessages(prev => [...prev, { 
         id: Date.now().toString() + "-err", 
         role: 'assistant', 
-        content: errorMessage, 
+        content: `DIAGNOSTIC ERROR: ${diagnostic}\n\nRECOVERY STEP: ${advice}`, 
         timestamp: new Date() 
       }]);
     } finally { 
@@ -322,43 +246,18 @@ const App: React.FC = () => {
           <div className="hidden xs:flex flex-col">
             <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display">Mastery Engine</h1>
             <div className="flex items-center space-x-1">
-              <div className={`h-1.5 w-1.5 rounded-full ${isApiKeyValid ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
+              <div className={`h-1.5 w-1.5 rounded-full ${syncStatus === 'online' ? 'bg-emerald-500 animate-pulse' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'}`}></div>
               <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                Neural Bridge: {isApiKeyValid ? 'Synchronized' : 'Offline'}
+                Neural Bridge: {syncStatus === 'online' ? 'Synchronized' : syncStatus === 'error' ? 'Sync Error' : 'Offline'}
               </span>
             </div>
           </div>
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
-          <div className="relative" ref={exportButtonRef}>
-            <button 
-              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
-              className={`p-1.5 md:p-2 rounded-lg transition-colors ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
-              title="Export Conversation"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-            </button>
-            
-            {isExportMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in slide-in-from-top-2 duration-200 z-[100]">
-                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span> Export as PDF
-                </button>
-                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span> Export as Word (.doc)
-                </button>
-                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-slate-400 mr-2"></span> Export as Plain Text
-                </button>
-              </div>
-            )}
-          </div>
-
           <button onClick={() => setIsConfirmClearOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-rose-600" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
           <button onClick={() => setIsGlossaryOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-amber-500" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
-          <button onClick={() => setIsLiveSessionOpen(true)} className="px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[9px] md:text-[10px] font-bold bg-indigo-600 text-white font-display hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/10">Live</button>
           <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1.5 md:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] md:text-xs transition-transform active:scale-90">{isDarkMode ? '☀️' : '🌙'}</button>
         </div>
       </header>
@@ -407,17 +306,6 @@ const App: React.FC = () => {
                   reader.onloadend = () => setSelectedFile({ data: (reader.result as string).split(',')[1], mimeType: file.type });
                   reader.readAsDataURL(file);
                 }} />
-                
-                <button 
-                  type="button" 
-                  onClick={isRecording ? stopVoiceTranscription : startVoiceTranscription} 
-                  className={`p-1.5 md:p-2 rounded-lg md:rounded-xl transition-all active:scale-90 ${isRecording ? 'text-white bg-indigo-600 animate-pulse shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:text-indigo-600'}`}
-                  title={isRecording ? "Stop Dictation" : "Dictate Inquiry"}
-                >
-                  <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </button>
               </div>
             </div>
             <button 
@@ -428,12 +316,10 @@ const App: React.FC = () => {
               <svg className="h-6 w-6 md:h-8 md:w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
           </form>
-          {selectedFile && <div className="mt-2 text-[9px] md:text-[11px] font-black text-indigo-600 flex items-center px-4 animate-in slide-in-from-left-2 uppercase tracking-widest font-display">Reference context attached • <button onClick={() => setSelectedFile(null)} className="ml-2 text-rose-500 underline">Remove</button></div>}
         </div>
       </footer>
 
       <Glossary items={glossary} onRemove={(id) => setGlossary(prev => { const upd = prev.filter(i => i.id !== id); localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; })} onAdd={(term, sub, def) => { const item = { id: Date.now().toString(), term, subject: sub, definition: def, timestamp: new Date() }; setGlossary(prev => { const upd = [item, ...prev]; localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; }); }} isOpen={isGlossaryOpen} onClose={() => setIsGlossaryOpen(false)} isDarkMode={isDarkMode} />
-      <LiveAudioSession isOpen={isLiveSessionOpen} onClose={() => setIsLiveSessionOpen(false)} isDarkMode={isDarkMode} systemInstruction="You are Mastery Engine. Deconstruct subjects into foundational concepts using logic and first principles." />
       <ConfirmationModal isOpen={isConfirmClearOpen} onClose={() => setIsConfirmClearOpen(false)} onConfirm={handleClearHistory} title="Reset Deconstruction" message="This will clear the current architectural thread. All derived logic will be lost from view." confirmLabel="Confirm Reset" isDarkMode={isDarkMode} />
     </div>
   );

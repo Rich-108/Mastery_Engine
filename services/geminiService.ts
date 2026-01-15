@@ -9,7 +9,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 2): Promi
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Neural synchronization timeout")), 20000)
+        setTimeout(() => reject(new Error("Neural Gateway Timeout (20s reached)")), 20000)
       );
       return await Promise.race([fn(), timeoutPromise]) as T;
     } catch (error: any) {
@@ -22,6 +22,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 2): Promi
         await sleep(waitTime);
         continue;
       }
+      // If it's a 403 or 400, don't retry, just throw
       throw error;
     }
   }
@@ -73,8 +74,9 @@ export const getGeminiResponse = async (
       contents.shift();
     }
 
+    // Using gemini-3-flash-preview for maximum reliability and speed
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents,
       config: {
         systemInstruction: `You are Mastery Engine, a conceptual architect. 
@@ -102,7 +104,7 @@ export const getGeminiResponse = async (
         4. CONCEPT MAP
         [A simple Mermaid flowchart showing the hierarchy of ideas.]
 
-        EXPANSION_NODES: [Deep Dive A, Related Topic B, Practical Use C]`,
+        EXPANSION_NODES: [Topic A, Topic B, Topic C]`,
         temperature: 0.7,
       },
     });
