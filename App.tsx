@@ -60,6 +60,7 @@ const App: React.FC = () => {
   
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('theme');
@@ -69,10 +70,63 @@ const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const handleEnter = () => {
     setHasEntered(true);
     localStorage.setItem(ENTRY_KEY, 'true');
+  };
+
+  const startVoiceTranscription = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser.");
+      return;
+    }
+    
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        }
+      }
+      if (finalTranscript) {
+        setInput(prev => (prev + ' ' + finalTranscript).trim());
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      stopVoiceTranscription();
+    };
+
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const stopVoiceTranscription = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const toggleVoiceInput = () => {
+    if (isRecording) {
+      stopVoiceTranscription();
+    } else {
+      startVoiceTranscription();
+    }
   };
 
   const handleExport = (type: 'pdf' | 'word' | 'txt' | 'json') => {
@@ -135,48 +189,33 @@ const App: React.FC = () => {
       }
       case 'pdf': {
         const doc = new jsPDF();
-        
-        // Document Header
         doc.setFont("helvetica", "bold");
         doc.setFontSize(22);
         doc.setTextColor(79, 70, 229);
         doc.text("MASTERY ENGINE", 15, 20);
-        
         doc.setFontSize(10);
         doc.setTextColor(150);
         doc.text(`CONCEPTUAL ARCHIVE | ${new Date().toLocaleString()}`, 15, 28);
         doc.setDrawColor(79, 70, 229);
         doc.line(15, 32, 195, 32);
-
         let cursorY = 45;
         const pageWidth = doc.internal.pageSize.getWidth();
         const margin = 15;
         const maxLineWidth = pageWidth - margin * 2;
-
         messages.forEach((m) => {
           if (cursorY > 270) {
             doc.addPage();
             cursorY = 20;
           }
-
-          // Role Label
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
-          if (m.role === 'assistant') {
-            doc.setTextColor(79, 70, 229); // indigo
-          } else {
-            doc.setTextColor(50, 50, 50); // dark grey
-          }
+          doc.setTextColor(m.role === 'assistant' ? 79 : 50, m.role === 'assistant' ? 70 : 50, m.role === 'assistant' ? 229 : 50);
           doc.text(`${m.role.toUpperCase()} [${m.timestamp.toLocaleTimeString()}]`, margin, cursorY);
           cursorY += 6;
-
-          // Content
           doc.setFont("helvetica", "normal");
           doc.setFontSize(10);
           doc.setTextColor(40);
-          
           const lines = doc.splitTextToSize(m.content, maxLineWidth);
-          
           lines.forEach((line: string) => {
             if (cursorY > 280) {
               doc.addPage();
@@ -185,10 +224,8 @@ const App: React.FC = () => {
             doc.text(line, margin, cursorY);
             cursorY += 5.5;
           });
-          
           cursorY += 12;
         });
-
         doc.save(`${filename}.pdf`);
         break;
       }
@@ -242,6 +279,7 @@ const App: React.FC = () => {
 
   const sendMessage = async (text: string, file?: FileData | null, lens?: string) => {
     if ((!text.trim() && !file && !lens) || isLoading) return;
+    if (isRecording) stopVoiceTranscription();
     
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -308,14 +346,13 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
-          {/* Export Dropdown Menu */}
           <div className="relative" ref={exportButtonRef}>
             <button 
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
               className={`p-1.5 md:p-2 rounded-lg transition-all ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
               title="Export Archive"
             >
-              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
             </button>
             
             {isExportMenuOpen && (
@@ -375,12 +412,24 @@ const App: React.FC = () => {
                 type="text" 
                 value={input} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder="Enter subject for conceptual deconstruction..." 
-                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all bg-slate-50 dark:bg-slate-800`}
+                placeholder={isRecording ? "Listening to inquiry..." : "Enter subject for conceptual deconstruction..."} 
+                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all ${isRecording ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/20' : 'bg-slate-50 dark:bg-slate-800'}`}
                 disabled={isLoading}
               />
               <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 md:p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Reference Image"><svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h14a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg></button>
+                <button 
+                  type="button" 
+                  onClick={toggleVoiceInput} 
+                  className={`p-1.5 md:p-2 rounded-full transition-all ${isRecording ? 'text-rose-600 bg-rose-100 dark:bg-rose-900/30 animate-pulse' : 'text-slate-400 hover:text-indigo-600'}`}
+                  title={isRecording ? "Stop Recording" : "Voice Input"}
+                >
+                  <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 md:p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Reference Image">
+                  <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h14a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                </button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
