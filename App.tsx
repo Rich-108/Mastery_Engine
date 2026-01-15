@@ -16,6 +16,15 @@ const INITIAL_MESSAGE: Message = {
   timestamp: new Date(),
 };
 
+const SYSTEM_INSTRUCTION = `You are Mastery Engine, a world-class conceptual architect and live mentor. 
+Your goal is to help users master any subject by deconstructing it into first principles.
+When speaking:
+1. Be concise but deep.
+2. Focus on the 'why' before the 'what'.
+3. Use physical analogies to explain abstract concepts.
+4. Guide the user through a hierarchy of logic.
+5. Keep the tone professional, encouraging, and highly intellectual.`;
+
 const STORAGE_KEY = 'mastery_engine_chat_session'; 
 const GLOSSARY_KEY = 'mastery_engine_glossary';
 const ENTRY_KEY = 'mastery_engine_entered';
@@ -24,6 +33,7 @@ const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(() => localStorage.getItem(ENTRY_KEY) === 'true');
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'error'>('online');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isLiveSessionOpen, setIsLiveSessionOpen] = useState(false);
   
   const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
     const key = process.env.API_KEY;
@@ -80,10 +90,6 @@ const App: React.FC = () => {
     localStorage.setItem(ENTRY_KEY, 'true');
   };
 
-  /**
-   * PERSISTENT VOICE INPUT (SPEECH-TO-TEXT)
-   * Designed for seamless 'voice typing'.
-   */
   const stopVoiceInput = useCallback((explicitStop = true) => {
     if (explicitStop) {
       shouldContinueListening.current = false;
@@ -97,7 +103,6 @@ const App: React.FC = () => {
         recognitionRef.current.onstart = null;
         recognitionRef.current.stop();
         
-        // Final cleanup
         setTimeout(() => {
           if (recognitionRef.current) {
             try { recognitionRef.current.abort(); } catch (e) {}
@@ -123,7 +128,6 @@ const App: React.FC = () => {
     }
 
     try {
-      // Ensure we have permission
       await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
       setVoiceError("Microphone permission denied");
@@ -131,7 +135,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // Prepare new session
     stopVoiceInput(false); 
     shouldContinueListening.current = true;
     setVoiceError(null);
@@ -169,14 +172,7 @@ const App: React.FC = () => {
 
     recognition.onerror = (event: any) => {
       const error = event.error;
-      console.warn(`Speech recognition engine: ${error}`);
-      
-      if (error === 'no-speech') {
-        // 'no-speech' is a timeout. We don't set a visible error, 
-        // just let it restart in onend if shouldContinueListening is true.
-        return;
-      }
-      
+      if (error === 'no-speech') return;
       if (['audio-capture', 'not-allowed', 'network'].includes(error)) {
         setVoiceError(`System: ${error}`);
         stopVoiceInput(true);
@@ -184,14 +180,8 @@ const App: React.FC = () => {
     };
 
     recognition.onend = () => {
-      // If we didn't stop explicitly (e.g., timeout), restart to maintain persistence
       if (shouldContinueListening.current) {
-        try {
-          recognition.start();
-        } catch (e) {
-          console.error("Speech restart failed:", e);
-          setIsListening(false);
-        }
+        try { recognition.start(); } catch (e) { setIsListening(false); }
       } else {
         setIsListening(false);
         setInterimInput('');
@@ -200,21 +190,12 @@ const App: React.FC = () => {
     };
 
     recognitionRef.current = recognition;
-    
-    try {
-      recognition.start();
-    } catch (e) {
-      console.error("Speech engine failed to initialize:", e);
-      setIsListening(false);
-    }
+    try { recognition.start(); } catch (e) { setIsListening(false); }
   }, [stopVoiceInput]);
 
   const toggleVoiceInput = () => {
-    if (isListening) {
-      stopVoiceInput();
-    } else {
-      startVoiceInput();
-    }
+    if (isListening) stopVoiceInput();
+    else startVoiceInput();
   };
 
   useEffect(() => {
@@ -224,29 +205,16 @@ const App: React.FC = () => {
     }
   }, [voiceError]);
 
-  useEffect(() => {
-    return () => {
-      shouldContinueListening.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch (e) {}
-      }
-    };
-  }, []);
-
   const handleExport = (type: 'pdf' | 'word' | 'txt' | 'json') => {
     const filename = `mastery_archive_${new Date().toISOString().slice(0,10)}`;
-    
     switch(type) {
       case 'txt': {
         const content = messages.map(m => `[${m.timestamp.toLocaleString()}] ${m.role.toUpperCase()}:\n${m.content}\n`).join('\n---\n\n');
         const blob = new Blob([content], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        a.href = url; a.download = `${filename}.txt`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         break;
       }
@@ -255,11 +223,8 @@ const App: React.FC = () => {
         const blob = new Blob([content], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        a.href = url; a.download = `${filename}.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         break;
       }
@@ -283,50 +248,33 @@ const App: React.FC = () => {
         const blob = new Blob(['\ufeff', header + content + footer], { type: 'application/msword' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.doc`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        a.href = url; a.download = `${filename}.doc`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         break;
       }
       case 'pdf': {
         const doc = new jsPDF();
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(22);
-        doc.setTextColor(79, 70, 229);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(79, 70, 229);
         doc.text("MASTERY ENGINE", 15, 20);
-        doc.setFontSize(10);
-        doc.setTextColor(150);
+        doc.setFontSize(10); doc.setTextColor(150);
         doc.text(`CONCEPTUAL ARCHIVE | ${new Date().toLocaleString()}`, 15, 28);
-        doc.setDrawColor(79, 70, 229);
-        doc.line(15, 32, 195, 32);
+        doc.setDrawColor(79, 70, 229); doc.line(15, 32, 195, 32);
         let cursorY = 45;
         const pageWidth = doc.internal.pageSize.getWidth();
         const margin = 15;
         const maxLineWidth = pageWidth - margin * 2;
         messages.forEach((m) => {
-          if (cursorY > 270) {
-            doc.addPage();
-            cursorY = 20;
-          }
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
+          if (cursorY > 270) { doc.addPage(); cursorY = 20; }
+          doc.setFont("helvetica", "bold"); doc.setFontSize(9);
           doc.setTextColor(m.role === 'assistant' ? 79 : 50, m.role === 'assistant' ? 70 : 50, m.role === 'assistant' ? 229 : 50);
           doc.text(`${m.role.toUpperCase()} [${m.timestamp.toLocaleTimeString()}]`, margin, cursorY);
           cursorY += 6;
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(10);
-          doc.setTextColor(40);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(40);
           const lines = doc.splitTextToSize(m.content, maxLineWidth);
           lines.forEach((line: string) => {
-            if (cursorY > 280) {
-              doc.addPage();
-              cursorY = 20;
-            }
-            doc.text(line, margin, cursorY);
-            cursorY += 5.5;
+            if (cursorY > 280) { doc.addPage(); cursorY = 20; }
+            doc.text(line, margin, cursorY); cursorY += 5.5;
           });
           cursorY += 12;
         });
@@ -385,7 +333,6 @@ const App: React.FC = () => {
     const messageContent = (text || interimInput).trim();
     if ((!messageContent && !file && !lens) || isLoading) return;
     
-    // Stop voice engine if a message is explicitly sent
     if (isListening) stopVoiceInput();
     
     const userMessage: Message = {
@@ -458,13 +405,21 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
+          <button 
+            onClick={() => setIsLiveSessionOpen(true)}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-600 hover:text-white transition-all group active:scale-95"
+          >
+            <div className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse group-hover:bg-white"></div>
+            <span className="text-[10px] font-black uppercase tracking-widest">Live</span>
+          </button>
+
           <div className="relative" ref={exportButtonRef}>
             <button 
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
               className={`p-1.5 md:p-2 rounded-lg transition-all ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
               title="Export Archive"
             >
-              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
             </button>
             
             {isExportMenuOpen && (
@@ -564,6 +519,7 @@ const App: React.FC = () => {
 
       <Glossary items={glossary} onRemove={(id) => setGlossary(prev => { const upd = prev.filter(i => i.id !== id); localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; })} onAdd={(term, sub, def) => { const item = { id: Date.now().toString(), term, subject: sub, definition: def, timestamp: new Date() }; setGlossary(prev => { const upd = [item, ...prev]; localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; }); }} isOpen={isGlossaryOpen} onClose={() => setIsGlossaryOpen(false)} isDarkMode={isDarkMode} />
       <ConfirmationModal isOpen={isConfirmClearOpen} onClose={() => setIsConfirmClearOpen(false)} onConfirm={handleClearHistory} title="Reset Deconstruction" message="This will clear the current architectural thread. All derived logic will be lost from view." confirmLabel="Confirm Reset" isDarkMode={isDarkMode} />
+      <LiveAudioSession isOpen={isLiveSessionOpen} onClose={() => setIsLiveSessionOpen(false)} isDarkMode={isDarkMode} systemInstruction={SYSTEM_INSTRUCTION} />
     </div>
   );
 };
