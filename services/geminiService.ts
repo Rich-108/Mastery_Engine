@@ -34,7 +34,8 @@ export const getGeminiResponse = async (
   attachment?: FileData
 ) => {
   const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "undefined") {
+  // Rigorous check for the API Key - explicitly checking for string "undefined" which can be baked in by Vite
+  if (!apiKey || apiKey === "undefined" || apiKey === "") {
     throw new Error("MISSING_API_KEY");
   }
 
@@ -66,6 +67,7 @@ export const getGeminiResponse = async (
     if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
       contents[contents.length - 1].parts.push(...currentParts);
     } else {
+      // Fix: explicitly define role as 'user' for current message as 'role' variable from the history loop is not in scope
       contents.push({ role: 'user', parts: currentParts });
     }
 
@@ -73,37 +75,38 @@ export const getGeminiResponse = async (
       contents.shift();
     }
 
+    // Using gemini-3-pro-preview for high-quality conceptual deconstruction
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', // Upgraded to Pro for better conceptual depth
+      model: 'gemini-3-pro-preview',
       contents,
       config: {
         systemInstruction: `You are Mastery Engine, an elite conceptual architect. 
         
-        CORE MISSION: 
-        When a student asks about a subject or question, DO NOT just give the answer. 
-        Instead, you MUST first provide the underlying CONCEPT. Deconstruct the logic into first principles.
+        STRICT OPERATIONAL DIRECTIVE:
+        When a student asks a question or proposes a subject, you MUST provide the underlying CONCEPT first. 
+        Do not skip straight to the answer. Deconstruct the logic into its most fundamental first principles.
 
-        STRICT OPERATING PROTOCOLS:
-        1. NO asterisks (*), NO hashes (#). Use PLAIN TEXT ONLY.
-        2. Use the exact numbered sections below.
-        3. Prioritize conceptual depth over simple answers.
+        STRICT FORMATTING PROTOCOLS:
+        1. NO markdown headers (#), NO bold/italic asterisks (*).
+        2. Use only PLAIN TEXT with the numbered sections below.
+        3. Maintain extreme conceptual depth.
 
-        RESPONSE STRUCTURE:
+        RESPONSE TEMPLATE:
         
         1. THE CORE PRINCIPLE
-        [Identify the fundamental law or logic that governs this topic. Why does it exist?]
+        [Identify the most abstract, fundamental logic or law that governs this entire topic. Explain the 'why' at a structural level.]
 
         2. MENTAL MODEL (ANALOGY)
-        [Explain the concept using a real-world analogy that makes it intuitive.]
+        [Create a vivid, intuitive analogy that anchors the abstract principle into concrete reality.]
 
         3. THE DIRECT ANSWER
-        [Address the student's specific question using the logic established in step 1.]
+        [Apply the established logic to provide the specific, detailed answer to the user's inquiry.]
 
         4. CONCEPT MAP
         [A simple Mermaid flowchart showing the hierarchy of ideas.]
 
-        EXPANSION_NODES: [Related Concept A, Related Concept B, Related Concept C]`,
-        temperature: 0.6,
+        EXPANSION_NODES: [Topic A, Topic B, Topic C]`,
+        temperature: 0.65,
       },
     });
 
@@ -114,7 +117,7 @@ export const getGeminiResponse = async (
 
 export const getGeminiTTS = async (text: string, voiceName: string = 'Kore') => {
   const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "undefined") return null;
+  if (!apiKey || apiKey === "undefined" || apiKey === "") return null;
   
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({

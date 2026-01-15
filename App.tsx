@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 const INITIAL_MESSAGE: Message = {
   id: 'welcome',
   role: 'assistant',
-  content: "Welcome to Mastery Engine. I am your Conceptual Architect. Propose any subject or question, and we will deconstruct it together to its first principles.",
+  content: "Welcome to Mastery Engine. I am your Conceptual Architect. Ask any subject or question, and I will deconstruct the underlying logic and concepts before providing the direct answer.",
   timestamp: new Date(),
 };
 
@@ -285,9 +285,9 @@ const App: React.FC = () => {
       const status = err.status || (err.response ? err.response.status : null);
 
       if (err.message === "MISSING_API_KEY") {
-        errorMessage = "API Configuration Missing: Please ensure the API_KEY environment variable is set in your Render dashboard.";
+        errorMessage = "CRITICAL: API Key not detected. To fix this, please ensure you have added the 'API_KEY' environment variable to your Render Dashboard settings and triggered a new manual deployment.";
       } else if (status === 401 || status === 403) {
-        errorMessage = "Neural Authorization Failed: The provided API key is invalid or unauthorized for this model.";
+        errorMessage = "CRITICAL: Neural Authorization Failed. The provided API key is invalid. Double check your key at ai.google.dev.";
       } else if (err.message?.includes('Safety')) {
         errorMessage = "The synthesis path was blocked by safety protocols. Try reframing your subject.";
       } else if (err.message?.includes('timeout')) {
@@ -367,7 +367,7 @@ const App: React.FC = () => {
                   <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                   <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce"></div>
                 </div>
-                <p className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.15em] md:tracking-[0.2em] text-indigo-500 font-display">Architecting Path...</p>
+                <p className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.15em] md:tracking-[0.2em] text-indigo-500 font-display">Architecting Logic...</p>
               </div>
             </div>
           )}
@@ -383,7 +383,7 @@ const App: React.FC = () => {
                 type="text" 
                 value={input} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder={isRecording ? "Listening to inquiry..." : "Enter subject for deconstruction..."} 
+                placeholder={isRecording ? "Listening to inquiry..." : "Enter subject for conceptual deconstruction..."} 
                 className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all
                   ${isRecording ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/20' : 'bg-slate-50 dark:bg-slate-800'}
                 `} 
