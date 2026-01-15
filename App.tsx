@@ -182,10 +182,7 @@ const App: React.FC = () => {
 
   const startVoiceTranscription = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error('Speech recognition not supported in this browser.');
-      return;
-    }
+    if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -198,32 +195,16 @@ const App: React.FC = () => {
     recognition.onresult = (event: any) => {
       let interimTranscript = '';
       let finalTranscript = '';
-
       for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
+        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+        else interimTranscript += event.results[i][0].transcript;
       }
-
       const combined = (lastFinalTranscriptRef.current + ' ' + finalTranscript + ' ' + interimTranscript).replace(/\s+/g, ' ').trim();
       setInput(combined);
-      
-      if (finalTranscript) {
-          lastFinalTranscriptRef.current = (lastFinalTranscriptRef.current + ' ' + finalTranscript).replace(/\s+/g, ' ').trim();
-      }
+      if (finalTranscript) lastFinalTranscriptRef.current = (lastFinalTranscriptRef.current + ' ' + finalTranscript).replace(/\s+/g, ' ').trim();
     };
-
-    recognition.onerror = (event: any) => {
-      if (event.error !== 'no-speech') {
-        console.warn('Speech recognition status:', event.error);
-      }
-      stopVoiceTranscription();
-    };
-
+    recognition.onerror = () => stopVoiceTranscription();
     recognition.onend = () => setIsRecording(false);
-
     recognitionRef.current = recognition;
     recognition.start();
   };
@@ -292,7 +273,7 @@ const App: React.FC = () => {
       );
       
       setMessages(prev => [...prev, { 
-        id: (Date.now() + 1).toString(), 
+        id: Date.now().toString() + "-ai", 
         role: 'assistant', 
         content: responseText, 
         timestamp: new Date() 
@@ -301,15 +282,18 @@ const App: React.FC = () => {
       console.error("Mastery Engine Synthesis Error:", err);
       const errorMessage = err.message?.includes('Safety') 
         ? "The synthesis path was blocked by safety protocols. Try reframing your subject."
-        : "I encountered a synchronization error in the neural bridge. Please try restating your subject.";
+        : err.message?.includes('timeout')
+        ? "The neural gateway is experiencing high latency. Please try again."
+        : "A neural synchronization error occurred. Please refresh the connection and try again.";
         
       setMessages(prev => [...prev, { 
-        id: Date.now().toString(), 
+        id: Date.now().toString() + "-err", 
         role: 'assistant', 
         content: errorMessage, 
         timestamp: new Date() 
       }]);
     } finally { 
+      // Ensure loading state is cleared even if error occurs
       setIsLoading(false); 
     }
   };
@@ -320,17 +304,17 @@ const App: React.FC = () => {
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors">
       <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl border-b border-slate-200 dark:border-slate-800 px-3 md:px-10 py-2.5 md:py-5 flex items-center justify-between shadow-sm z-30">
         <div className="flex items-center space-x-2">
-          <div className="bg-indigo-600 p-2 rounded-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
+          <div className="bg-indigo-600 p-1.5 md:p-2 rounded-lg md:rounded-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
             <svg className="h-4 w-4 md:h-6 md:w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
-          <h1 className="text-sm md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display hidden xs:block">Mastery Engine</h1>
+          <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display hidden xs:block">Mastery Engine</h1>
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
           <div className="relative" ref={exportButtonRef}>
             <button 
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
-              className={`p-2 rounded-lg transition-colors ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
+              className={`p-1.5 md:p-2 rounded-lg transition-colors ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
               title="Export Conversation"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -338,28 +322,28 @@ const App: React.FC = () => {
             
             {isExportMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in slide-in-from-top-2 duration-200 z-[100]">
-                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
                   <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span> Export as PDF
                 </button>
-                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
                   <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span> Export as Word (.doc)
                 </button>
-                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
                   <span className="w-2 h-2 rounded-full bg-slate-400 mr-2"></span> Export as Plain Text
                 </button>
                 <div className="h-px bg-slate-100 dark:bg-slate-700 my-1"></div>
-                <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-2 text-[10px] font-bold text-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-2 text-[9px] md:text-[10px] font-bold text-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
                    Raw Archive (.json)
                 </button>
               </div>
             )}
           </div>
 
-          <button onClick={() => setIsConfirmClearOpen(true)} className="p-2 text-slate-400 hover:text-rose-600" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
-          <button onClick={() => setIsGlossaryOpen(true)} className="p-2 text-slate-400 hover:text-amber-500" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
+          <button onClick={() => setIsConfirmClearOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-rose-600" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+          <button onClick={() => setIsGlossaryOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-amber-500" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
-          <button onClick={() => setIsLiveSessionOpen(true)} className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-indigo-600 text-white font-display hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/10">Live</button>
-          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs transition-transform active:scale-90">{isDarkMode ? '☀️' : '🌙'}</button>
+          <button onClick={() => setIsLiveSessionOpen(true)} className="px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-[9px] md:text-[10px] font-bold bg-indigo-600 text-white font-display hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/10">Live</button>
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1.5 md:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] md:text-xs transition-transform active:scale-90">{isDarkMode ? '☀️' : '🌙'}</button>
         </div>
       </header>
 
@@ -369,10 +353,14 @@ const App: React.FC = () => {
             <ChatMessage key={msg.id} message={msg} onSelectTopic={(t) => sendMessage(`Deconstruct the concept of: ${t}`)} onRefineConcept={(lens) => sendMessage('', null, lens)} onHarvestConcept={handleHarvestConcept} isDarkMode={isDarkMode} />
           ))}
           {isLoading && (
-            <div className="flex justify-start mb-12 animate-pulse">
-              <div className="bg-white dark:bg-slate-900 rounded-[2rem] px-8 py-5 shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center space-x-4">
-                <div className="h-3 w-3 bg-indigo-500 rounded-full animate-bounce"></div>
-                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-indigo-500 font-display">Architecting Knowledge Path...</p>
+            <div className="flex justify-start mb-8 md:mb-12">
+              <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] md:rounded-[2rem] px-5 md:px-8 py-3 md:py-5 shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center space-x-3 md:space-x-4">
+                <div className="flex space-x-1">
+                  <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                  <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                  <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce"></div>
+                </div>
+                <p className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.15em] md:tracking-[0.2em] text-indigo-500 font-display">Architecting Path...</p>
               </div>
             </div>
           )}
@@ -382,20 +370,20 @@ const App: React.FC = () => {
 
       <footer className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-t border-slate-200 dark:border-slate-800 p-4 sm:p-8 md:p-12 z-40">
         <div className="max-w-4xl mx-auto">
-          <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-3 md:space-x-6">
+          <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-2 md:space-x-6">
             <div className="relative flex-1 group">
               <input 
                 type="text" 
                 value={input} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder={isRecording ? "Listening to your inquiry..." : "Enter a subject for conceptual deconstruction..."} 
-                className={`w-full border rounded-[2rem] px-8 py-4.5 pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[13px] md:text-[15px] font-medium transition-all
+                placeholder={isRecording ? "Listening to inquiry..." : "Enter subject for deconstruction..."} 
+                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all
                   ${isRecording ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/20' : 'bg-slate-50 dark:bg-slate-800'}
                 `} 
                 disabled={isLoading}
               />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center space-x-2">
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Reference Image"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h14a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg></button>
+              <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 md:p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Reference Image"><svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h14a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg></button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -407,10 +395,10 @@ const App: React.FC = () => {
                 <button 
                   type="button" 
                   onClick={isRecording ? stopVoiceTranscription : startVoiceTranscription} 
-                  className={`p-2.5 rounded-xl transition-all active:scale-90 ${isRecording ? 'text-white bg-indigo-600 animate-pulse shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:text-indigo-600'}`}
+                  className={`p-1.5 md:p-2 rounded-lg md:rounded-xl transition-all active:scale-90 ${isRecording ? 'text-white bg-indigo-600 animate-pulse shadow-lg shadow-indigo-500/30' : 'text-slate-400 hover:text-indigo-600'}`}
                   title={isRecording ? "Stop Dictation" : "Dictate Inquiry"}
                 >
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                   </svg>
                 </button>
@@ -419,12 +407,12 @@ const App: React.FC = () => {
             <button 
               type="submit" 
               disabled={(!input.trim() && !selectedFile) || isLoading} 
-              className="flex items-center justify-center h-14 w-14 md:h-16 md:w-16 rounded-[1.5rem] text-white shadow-2xl active:scale-95 disabled:opacity-50 transition-all bg-indigo-600 hover:bg-indigo-700 flex-shrink-0"
+              className="flex items-center justify-center h-12 w-12 md:h-16 md:w-16 rounded-xl md:rounded-[1.5rem] text-white shadow-2xl active:scale-95 disabled:opacity-50 transition-all bg-indigo-600 hover:bg-indigo-700 flex-shrink-0"
             >
-              <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+              <svg className="h-6 w-6 md:h-8 md:w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
           </form>
-          {selectedFile && <div className="mt-3 text-[11px] font-black text-indigo-600 flex items-center px-4 animate-in slide-in-from-left-2 uppercase tracking-widest font-display">Reference context attached • <button onClick={() => setSelectedFile(null)} className="ml-2 text-rose-500 underline">Remove</button></div>}
+          {selectedFile && <div className="mt-2 text-[9px] md:text-[11px] font-black text-indigo-600 flex items-center px-4 animate-in slide-in-from-left-2 uppercase tracking-widest font-display">Reference context attached • <button onClick={() => setSelectedFile(null)} className="ml-2 text-rose-500 underline">Remove</button></div>}
         </div>
       </footer>
 
