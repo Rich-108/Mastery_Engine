@@ -23,6 +23,7 @@ const ENTRY_KEY = 'mastery_engine_entered';
 const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(() => localStorage.getItem(ENTRY_KEY) === 'true');
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'error'>('online');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
     const key = process.env.API_KEY;
@@ -57,7 +58,6 @@ const App: React.FC = () => {
   const [isGlossaryOpen, setIsGlossaryOpen] = useState(false);
   const [isLiveSessionOpen, setIsLiveSessionOpen] = useState(false);
   const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -72,15 +72,14 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const lastFinalTranscriptRef = useRef<string>('');
 
   const handleEnter = () => {
     setHasEntered(true);
     localStorage.setItem(ENTRY_KEY, 'true');
   };
 
-  const handleExport = (type: 'pdf' | 'word' | 'txt' | 'json') => {
-    const filename = `mastery_export_${new Date().toISOString().slice(0,10)}`;
+  const handleExport = (type: 'pdf' | 'word' | 'txt') => {
+    const filename = `mastery_archive_${new Date().toISOString().slice(0,10)}`;
     
     switch(type) {
       case 'txt': {
@@ -90,19 +89,87 @@ const App: React.FC = () => {
         const a = document.createElement('a');
         a.href = url;
         a.download = `${filename}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        break;
+      }
+      case 'word': {
+        const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+          <head><meta charset='utf-8'><title>Mastery Archive</title><style>
+            body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20pt; }
+            .msg { margin-bottom: 25pt; border-bottom: 1px solid #eee; padding-bottom: 15pt; }
+            .role { font-weight: bold; color: #4f46e5; text-transform: uppercase; font-size: 10pt; margin-bottom: 5pt; }
+            .time { color: #999; font-weight: normal; font-size: 8pt; margin-left: 10pt; }
+            .content { font-size: 11pt; line-height: 1.6; color: #333; }
+            h1 { color: #1e1b4b; border-bottom: 2px solid #4f46e5; padding-bottom: 10pt; }
+          </style></head><body><h1>Mastery Engine: Conceptual Archive</h1><p>Generated on: ${new Date().toLocaleString()}</p>`;
+        const footer = `</body></html>`;
+        const content = messages.map(m => `
+          <div class="msg">
+            <div class="role">${m.role} <span class="time">${m.timestamp.toLocaleString()}</span></div>
+            <div class="content">${m.content.replace(/\n/g, '<br/>')}</div>
+          </div>
+        `).join('');
+        const blob = new Blob(['\ufeff', header + content + footer], { type: 'application/msword' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}.doc`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
         break;
       }
       case 'pdf': {
         const doc = new jsPDF();
-        doc.setFontSize(16);
-        doc.text("Mastery Engine - Conceptual Archive", 10, 20);
-        let cursorY = 40;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(22);
+        doc.setTextColor(79, 70, 229);
+        doc.text("MASTERY ENGINE", 10, 20);
+        
+        doc.setFontSize(10);
+        doc.setTextColor(150);
+        doc.text(`CONCEPTUAL ARCHIVE - ${new Date().toLocaleString()}`, 10, 28);
+        doc.line(10, 32, 200, 32);
+
+        let cursorY = 45;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 15;
+        const maxLineWidth = pageWidth - margin * 2;
+
         messages.forEach((m) => {
-          const lines = doc.splitTextToSize(`${m.role.toUpperCase()}: ${m.content}`, 180);
-          doc.text(lines, 10, cursorY);
-          cursorY += (lines.length * 7) + 5;
-          if (cursorY > 270) { doc.addPage(); cursorY = 20; }
+          // Check for new page
+          if (cursorY > 270) {
+            doc.addPage();
+            cursorY = 20;
+          }
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(m.role === 'assistant' ? 79 : 100, m.role === 'assistant' ? 70 : 100, m.role === 'assistant' ? 229 : 100);
+          doc.text(`${m.role.toUpperCase()} [${m.timestamp.toLocaleTimeString()}]`, margin, cursorY);
+          cursorY += 6;
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(40);
+          const lines = doc.splitTextToSize(m.content, maxLineWidth);
+          
+          lines.forEach((line: string) => {
+            if (cursorY > 280) {
+              doc.addPage();
+              cursorY = 20;
+            }
+            doc.text(line, margin, cursorY);
+            cursorY += 6;
+          });
+          
+          cursorY += 10;
         });
+
         doc.save(`${filename}.pdf`);
         break;
       }
@@ -127,32 +194,6 @@ const App: React.FC = () => {
     setIsGlossaryOpen(true);
   };
 
-  const startVoiceTranscription = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.onstart = () => setIsRecording(true);
-    recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-      }
-      if (finalTranscript) setInput(prev => (prev + ' ' + finalTranscript).trim());
-    };
-    recognition.onerror = () => stopVoiceTranscription();
-    recognition.onend = () => setIsRecording(false);
-    recognitionRef.current = recognition;
-    recognition.start();
-  };
-
-  const stopVoiceTranscription = () => {
-    if (recognitionRef.current) { recognitionRef.current.stop(); recognitionRef.current = null; }
-    setIsRecording(false);
-  };
-
   const handleClearHistory = () => {
     setMessages([INITIAL_MESSAGE]);
     sessionStorage.removeItem(STORAGE_KEY);
@@ -168,12 +209,21 @@ const App: React.FC = () => {
     if (isDarkMode) root.classList.add('dark'); else root.classList.remove('dark');
   }, [isDarkMode]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportButtonRef.current && !exportButtonRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
   const sendMessage = async (text: string, file?: FileData | null, lens?: string) => {
     if ((!text.trim() && !file && !lens) || isLoading) return;
-    if (isRecording) stopVoiceTranscription();
-
+    
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -206,27 +256,11 @@ const App: React.FC = () => {
       }]);
       setSyncStatus('online');
     } catch (err: any) { 
-      console.error("Mastery Engine Synthesis Error:", err);
       setSyncStatus('error');
-      
-      let diagnostic = err.message || "Unknown neural interference.";
-      let advice = "Please verify your API key and network connection.";
-
-      if (err.message === "MISSING_API_KEY") {
-        diagnostic = "API Key not found in environment.";
-        advice = "Ensure 'API_KEY' is set in Render Dashboard and trigger a manual 'Clear Cache & Deploy'.";
-      } else if (err.status === 403 || err.status === 401) {
-        diagnostic = "Access Denied (Invalid Key).";
-        advice = "The key you provided was rejected by Google. Double check at ai.google.dev.";
-      } else if (err.message?.includes('Timeout')) {
-        diagnostic = "Neural Gateway Timeout.";
-        advice = "The server took too long to respond. Try a shorter query.";
-      }
-        
       setMessages(prev => [...prev, { 
         id: Date.now().toString() + "-err", 
         role: 'assistant', 
-        content: `DIAGNOSTIC ERROR: ${diagnostic}\n\nRECOVERY STEP: ${advice}`, 
+        content: `Error: ${err.message || "Neural synchronization failed."}`, 
         timestamp: new Date() 
       }]);
     } finally { 
@@ -255,6 +289,31 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportButtonRef}>
+            <button 
+              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
+              className={`p-1.5 md:p-2 rounded-lg transition-all ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
+              title="Archive Session"
+            >
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            </button>
+            
+            {isExportMenuOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in slide-in-from-top-2 duration-200 z-[100]">
+                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 mr-2"></span> Export as PDF
+                </button>
+                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span> Export as Word (.doc)
+                </button>
+                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
+                  <span className="w-2 h-2 rounded-full bg-slate-400 mr-2"></span> Export as Plain Text
+                </button>
+              </div>
+            )}
+          </div>
+
           <button onClick={() => setIsConfirmClearOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-rose-600" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
           <button onClick={() => setIsGlossaryOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-amber-500" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
           <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
