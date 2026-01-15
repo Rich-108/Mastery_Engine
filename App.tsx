@@ -56,12 +56,10 @@ const App: React.FC = () => {
   });
 
   const [isGlossaryOpen, setIsGlossaryOpen] = useState(false);
-  const [isLiveSessionOpen, setIsLiveSessionOpen] = useState(false);
   const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
   
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('theme');
@@ -71,14 +69,13 @@ const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
 
   const handleEnter = () => {
     setHasEntered(true);
     localStorage.setItem(ENTRY_KEY, 'true');
   };
 
-  const handleExport = (type: 'pdf' | 'word' | 'txt') => {
+  const handleExport = (type: 'pdf' | 'word' | 'txt' | 'json') => {
     const filename = `mastery_archive_${new Date().toISOString().slice(0,10)}`;
     
     switch(type) {
@@ -89,6 +86,19 @@ const App: React.FC = () => {
         const a = document.createElement('a');
         a.href = url;
         a.download = `${filename}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        break;
+      }
+      case 'json': {
+        const content = JSON.stringify(messages, null, 2);
+        const blob = new Blob([content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -125,15 +135,18 @@ const App: React.FC = () => {
       }
       case 'pdf': {
         const doc = new jsPDF();
+        
+        // Document Header
         doc.setFont("helvetica", "bold");
         doc.setFontSize(22);
         doc.setTextColor(79, 70, 229);
-        doc.text("MASTERY ENGINE", 10, 20);
+        doc.text("MASTERY ENGINE", 15, 20);
         
         doc.setFontSize(10);
         doc.setTextColor(150);
-        doc.text(`CONCEPTUAL ARCHIVE - ${new Date().toLocaleString()}`, 10, 28);
-        doc.line(10, 32, 200, 32);
+        doc.text(`CONCEPTUAL ARCHIVE | ${new Date().toLocaleString()}`, 15, 28);
+        doc.setDrawColor(79, 70, 229);
+        doc.line(15, 32, 195, 32);
 
         let cursorY = 45;
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -141,21 +154,27 @@ const App: React.FC = () => {
         const maxLineWidth = pageWidth - margin * 2;
 
         messages.forEach((m) => {
-          // Check for new page
           if (cursorY > 270) {
             doc.addPage();
             cursorY = 20;
           }
 
+          // Role Label
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
-          doc.setTextColor(m.role === 'assistant' ? 79 : 100, m.role === 'assistant' ? 70 : 100, m.role === 'assistant' ? 229 : 100);
+          if (m.role === 'assistant') {
+            doc.setTextColor(79, 70, 229); // indigo
+          } else {
+            doc.setTextColor(50, 50, 50); // dark grey
+          }
           doc.text(`${m.role.toUpperCase()} [${m.timestamp.toLocaleTimeString()}]`, margin, cursorY);
           cursorY += 6;
 
+          // Content
           doc.setFont("helvetica", "normal");
           doc.setFontSize(10);
           doc.setTextColor(40);
+          
           const lines = doc.splitTextToSize(m.content, maxLineWidth);
           
           lines.forEach((line: string) => {
@@ -164,10 +183,10 @@ const App: React.FC = () => {
               cursorY = 20;
             }
             doc.text(line, margin, cursorY);
-            cursorY += 6;
+            cursorY += 5.5;
           });
           
-          cursorY += 10;
+          cursorY += 12;
         });
 
         doc.save(`${filename}.pdf`);
@@ -289,26 +308,32 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-1 md:space-x-3">
-          {/* Export Dropdown */}
+          {/* Export Dropdown Menu */}
           <div className="relative" ref={exportButtonRef}>
             <button 
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
               className={`p-1.5 md:p-2 rounded-lg transition-all ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
-              title="Archive Session"
+              title="Export Archive"
             >
               <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
             </button>
             
             {isExportMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in slide-in-from-top-2 duration-200 z-[100]">
-                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 mr-2"></span> Export as PDF
+              <div className="absolute right-0 mt-3 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 animate-in slide-in-from-top-2 duration-300 z-[100] ring-4 ring-indigo-500/5">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 mb-1">
+                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Synthesis Export</p>
+                </div>
+                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 mr-3 animate-pulse"></span> Export as PDF
                 </button>
-                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 mr-2"></span> Export as Word (.doc)
+                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 mr-3"></span> Export as Word (.doc)
                 </button>
-                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-slate-400 mr-2"></span> Export as Plain Text
+                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 mr-3"></span> Export as Transcript
+                </button>
+                <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 mr-3"></span> Export as JSON Data
                 </button>
               </div>
             )}
@@ -350,10 +375,8 @@ const App: React.FC = () => {
                 type="text" 
                 value={input} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder={isRecording ? "Listening to inquiry..." : "Enter subject for conceptual deconstruction..."} 
-                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all
-                  ${isRecording ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/20' : 'bg-slate-50 dark:bg-slate-800'}
-                `} 
+                placeholder="Enter subject for conceptual deconstruction..." 
+                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-28 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all bg-slate-50 dark:bg-slate-800`}
                 disabled={isLoading}
               />
               <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
