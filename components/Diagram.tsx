@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import mermaid from 'mermaid';
 
 interface DiagramProps {
@@ -32,8 +32,11 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
   }, [appDarkMode]);
 
   const sanitizeMermaid = (raw: string): string => {
-    // 1. Basic cleanup of code blocks
-    let processed = raw.replace(/```mermaid\n?|```/g, '').trim();
+    // 1. Basic cleanup of code blocks and common AI artifacts
+    let processed = raw
+      .replace(/```mermaid\n?|```/g, '')
+      .replace(/^[\d]+\.\s*/gm, '') // Remove numbered list markers at start of lines
+      .trim();
     
     // 2. Fix common AI arrow mistakes
     processed = processed
@@ -41,40 +44,69 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
       .replace(/-\s*->/g, '-->')
       .replace(/=\s*=>/g, '==>');
 
-    // 3. Normalize the header (case-insensitive detection, standard lowercase output)
+    // 3. Normalize the header
     let lines = processed.split('\n');
     
-    // Check if the first non-empty line has a valid diagram type
     const headerRegex = /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/i;
     let headerIndex = lines.findIndex(l => l.trim().match(headerRegex));
 
     if (headerIndex !== -1) {
-      // Force the diagram type keyword to lowercase to avoid UnknownDiagramError
-      lines[headerIndex] = lines[headerIndex].replace(headerRegex, (match) => match.toLowerCase());
+      let header = lines[headerIndex].trim();
+      // Force diagram type to lowercase
+      header = header.replace(headerRegex, (match) => match.toLowerCase());
+      
+      // Fix invalid directions (e.g., "graph TDA" -> "flowchart TD")
+      if (header.match(/^(graph|flowchart)/)) {
+        if (!header.match(/\s+(TD|TB|BT|RL|LR)$/i)) {
+          header = 'flowchart TD';
+        }
+      }
+      lines[headerIndex] = header;
     } else {
-      // If no valid header is found, prepend a default one
       lines.unshift('flowchart TD');
     }
 
-    // 4. Sanitize node labels while respecting nested syntax
+    // 4. Sanitize node labels
     const sanitizedLines = lines.map(line => {
       let l = line.trim();
       // Skip headers, empty lines, and comments
       if (!l || l.match(headerRegex) || l.startsWith('%%')) return l;
       
+      // Clean up "hanging" quotes from AI hallucinations around IDs e.g. "A"[Label]
+      l = l.replace(/"([a-zA-Z0-9_\-]+)"/g, '$1');
+
       /**
-       * This regex looks for patterns like: nodeID[Label Content] or nodeID((Label Content))
-       * It ensures labels are wrapped in quotes ONLY if they aren't already,
-       * preventing syntax errors from special characters like parentheses.
+       * Regex to match all Mermaid node shapes.
+       * Captures: ID, Open, Content, Close.
        */
-      return l.replace(/([a-zA-Z0-9_\-]+)\s*([\[\(\{]{1,2})(.*?)([\]\)\}]{1,2})/g, (match, id, open, label, close) => {
-        let cleanLabel = label.trim();
-        // If label contains quotes or is already quoted, don't wrap it
-        if (cleanLabel && !cleanLabel.startsWith('"') && !cleanLabel.endsWith('"')) {
-          // Escape existing internal quotes and wrap in double quotes
-          cleanLabel = `"${cleanLabel.replace(/"/g, "'")}"`;
+      const nodeRegex = /([a-zA-Z0-9_\-]+)\s*(?:(\[\()(.+?)(\)\])|(\[\[)(.+?)(\]\])|(\{\{)(.+?)(\}\})|(\(\()(.+?)(\)\))|(\[\/)(.+?)(\\\])|(\[\\)(.+?)(\/\])|(\[)(.+?)(\])|(\()(.+?)(\))|(\{)(.+?)(\})|(\>)(.+?)(\]))/g;
+
+      return l.replace(nodeRegex, (match, id, ...args) => {
+        // Find the matched group for open/label/close
+        let open = '', label = '', close = '';
+        for (let i = 0; i < args.length - 2; i += 3) {
+           if (args[i]) {
+             open = args[i];
+             label = args[i+1];
+             close = args[i+2];
+             break;
+           }
         }
-        return `${id}${open}${cleanLabel}${close}`;
+        
+        if (!label) return match;
+
+        let cleanLabel = label.trim();
+        
+        // 1. Remove existing wrapping quotes if present
+        if (cleanLabel.startsWith('"') && cleanLabel.endsWith('"') && cleanLabel.length >= 2) {
+          cleanLabel = cleanLabel.slice(1, -1);
+        }
+
+        // 2. Escape internal double quotes to single quotes
+        cleanLabel = cleanLabel.replace(/"/g, "'");
+
+        // 3. Always re-wrap in double quotes to ensure valid Mermaid syntax
+        return `${id}${open}"${cleanLabel}"${close}`;
       });
     });
 
@@ -92,15 +124,19 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
         const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
         const cleanChart = sanitizeMermaid(chart);
         
+        // Re-initialize for theme updates
         mermaid.initialize({
           startOnLoad: false,
           theme: effectiveDarkMode ? 'dark' : 'neutral',
           securityLevel: 'loose',
+          fontFamily: '"Outfit", sans-serif',
           flowchart: {
             useMaxWidth: true,
-            padding: 15,
+            htmlLabels: true,
+            curve: 'basis',
             nodeSpacing: 50,
-            rankSpacing: 50
+            rankSpacing: 50,
+            padding: 20
           }
         });
 
