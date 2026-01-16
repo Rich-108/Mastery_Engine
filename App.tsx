@@ -429,7 +429,9 @@ const App: React.FC = () => {
 
   if (!hasEntered) return <LandingPage onEnter={handleEnter} isDarkMode={isDarkMode} />;
 
-  const displayInputValue = (input + (interimInput ? ' ' + interimInput : '')).trim();
+  // Fixed: Removed .trim() to allow users to type spaces naturally in the input field.
+  // Logic updated to ensure spacing exists between input and interim voice results if needed.
+  const displayInputValue = input + (interimInput ? (input && !input.endsWith(' ') ? ' ' : '') + interimInput : '');
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
