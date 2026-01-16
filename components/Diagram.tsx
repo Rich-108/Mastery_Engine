@@ -32,27 +32,46 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
   }, [appDarkMode]);
 
   const sanitizeMermaid = (raw: string): string => {
+    // 1. Basic cleanup of code blocks
     let processed = raw.replace(/```mermaid\n?|```/g, '').trim();
     
+    // 2. Fix common AI arrow mistakes
     processed = processed
       .replace(/--\s*>/g, '-->')
       .replace(/-\s*->/g, '-->')
       .replace(/=\s*=>/g, '==>');
 
-    processed = processed.replace(/^(flowchart|graph)\s+(TD|LR|BT|RL)\s*([^\s\n])/i, '$1 $2\n$3');
-    
+    // 3. Normalize the header (case-insensitive detection, standard lowercase output)
     let lines = processed.split('\n');
-    if (lines.length > 0 && !lines[0].match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/i)) {
+    
+    // Check if the first non-empty line has a valid diagram type
+    const headerRegex = /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/i;
+    let headerIndex = lines.findIndex(l => l.trim().match(headerRegex));
+
+    if (headerIndex !== -1) {
+      // Force the diagram type keyword to lowercase to avoid UnknownDiagramError
+      lines[headerIndex] = lines[headerIndex].replace(headerRegex, (match) => match.toLowerCase());
+    } else {
+      // If no valid header is found, prepend a default one
       lines.unshift('flowchart TD');
     }
 
+    // 4. Sanitize node labels while respecting nested syntax
     const sanitizedLines = lines.map(line => {
       let l = line.trim();
-      if (!l || l.match(/^(graph|flowchart|sequenceDiagram)/i) || l.startsWith('%%')) return l;
+      // Skip headers, empty lines, and comments
+      if (!l || l.match(headerRegex) || l.startsWith('%%')) return l;
       
+      /**
+       * This regex looks for patterns like: nodeID[Label Content] or nodeID((Label Content))
+       * It ensures labels are wrapped in quotes ONLY if they aren't already,
+       * preventing syntax errors from special characters like parentheses.
+       */
       return l.replace(/([a-zA-Z0-9_\-]+)\s*([\[\(\{]{1,2})(.*?)([\]\)\}]{1,2})/g, (match, id, open, label, close) => {
         let cleanLabel = label.trim();
-        if (cleanLabel && !cleanLabel.startsWith('"')) {
+        // If label contains quotes or is already quoted, don't wrap it
+        if (cleanLabel && !cleanLabel.startsWith('"') && !cleanLabel.endsWith('"')) {
+          // Escape existing internal quotes and wrap in double quotes
           cleanLabel = `"${cleanLabel.replace(/"/g, "'")}"`;
         }
         return `${id}${open}${cleanLabel}${close}`;

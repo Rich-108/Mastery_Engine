@@ -7,6 +7,7 @@ import Glossary from './components/Glossary';
 import ConfirmationModal from './components/ConfirmationModal';
 import LandingPage from './components/LandingPage';
 import LiveAudioSession from './components/LiveAudioSession';
+import TutorialOverlay from './components/TutorialOverlay';
 import { jsPDF } from 'jspdf';
 
 const INITIAL_MESSAGE: Message = {
@@ -28,12 +29,14 @@ When speaking:
 const STORAGE_KEY = 'mastery_engine_chat_session'; 
 const GLOSSARY_KEY = 'mastery_engine_glossary';
 const ENTRY_KEY = 'mastery_engine_entered';
+const TUTORIAL_KEY = 'mastery_engine_tutorial_seen';
 
 const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(() => localStorage.getItem(ENTRY_KEY) === 'true');
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'error'>('online');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isLiveSessionOpen, setIsLiveSessionOpen] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   
   const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
     const key = process.env.API_KEY;
@@ -83,61 +86,46 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const shouldContinueListening = useRef(false);
+  const isStoppingRef = useRef(false);
 
   const handleEnter = () => {
     setHasEntered(true);
     localStorage.setItem(ENTRY_KEY, 'true');
+    // Trigger tutorial for first time users
+    if (!localStorage.getItem(TUTORIAL_KEY)) {
+      setIsTutorialOpen(true);
+    }
   };
 
-  const stopVoiceInput = useCallback((explicitStop = true) => {
-    if (explicitStop) {
-      shouldContinueListening.current = false;
-    }
-    
+  const stopVoiceInput = useCallback(() => {
+    isStoppingRef.current = true;
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.onstart = null;
         recognitionRef.current.stop();
-        
-        setTimeout(() => {
-          if (recognitionRef.current) {
-            try { recognitionRef.current.abort(); } catch (e) {}
-            recognitionRef.current = null;
-          }
-        }, 100);
       } catch (e) {
-        console.warn("Speech engine cleanup warning:", e);
+        console.warn("Speech recognition stop error:", e);
       }
     }
-    
-    if (explicitStop) {
-      setIsListening(false);
-      setInterimInput('');
-    }
+    setIsListening(false);
+    setInterimInput('');
   }, []);
 
   const startVoiceInput = useCallback(async () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setVoiceError("Speech recognition not supported");
+      setVoiceError("System: API Unsupported");
       return;
     }
 
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      setVoiceError("Microphone permission denied");
-      setIsListening(false);
+      setVoiceError("System: Access Denied");
       return;
     }
 
-    stopVoiceInput(false); 
-    shouldContinueListening.current = true;
-    setVoiceError(null);
+    if (recognitionRef.current) stopVoiceInput();
+    isStoppingRef.current = false;
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -146,42 +134,46 @@ const App: React.FC = () => {
 
     recognition.onstart = () => {
       setIsListening(true);
-      setInterimInput('');
+      setVoiceError(null);
     };
 
     recognition.onresult = (event: any) => {
-      let finalForThisResult = '';
-      let interimForThisResult = '';
+      let finalTranscript = '';
+      let interimTranscript = '';
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalForThisResult += transcript;
+          finalTranscript += transcript;
         } else {
-          interimForThisResult += transcript;
+          interimTranscript += transcript;
         }
       }
 
-      if (finalForThisResult) {
-        setInput(prev => (prev.trim() + ' ' + finalForThisResult).trim());
-        setInterimInput('');
-      } else {
-        setInterimInput(interimForThisResult);
+      if (finalTranscript) {
+        setInput(prev => {
+          const combined = (prev.trim() + ' ' + finalTranscript).trim();
+          return combined;
+        });
       }
+      setInterimInput(interimTranscript);
     };
 
     recognition.onerror = (event: any) => {
-      const error = event.error;
-      if (error === 'no-speech') return;
-      if (['audio-capture', 'not-allowed', 'network'].includes(error)) {
-        setVoiceError(`System: ${error}`);
-        stopVoiceInput(true);
-      }
+      if (event.error === 'no-speech') return;
+      console.error("Speech Recognition Error:", event.error);
+      setVoiceError(`System: ${event.error}`);
+      stopVoiceInput();
     };
 
     recognition.onend = () => {
-      if (shouldContinueListening.current) {
-        try { recognition.start(); } catch (e) { setIsListening(false); }
+      if (!isStoppingRef.current) {
+        // Handle unexpected service disconnection by attempting a restart
+        try {
+          recognition.start();
+        } catch (e) {
+          setIsListening(false);
+        }
       } else {
         setIsListening(false);
         setInterimInput('');
@@ -190,13 +182,27 @@ const App: React.FC = () => {
     };
 
     recognitionRef.current = recognition;
-    try { recognition.start(); } catch (e) { setIsListening(false); }
+    try {
+      recognition.start();
+    } catch (e) {
+      setVoiceError("System: Start Failed");
+      setIsListening(false);
+    }
   }, [stopVoiceInput]);
 
   const toggleVoiceInput = () => {
     if (isListening) stopVoiceInput();
     else startVoiceInput();
   };
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (voiceError) {
@@ -314,7 +320,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const root = window.document.documentElement;
-    if (isDarkMode) root.classList.add('dark'); else root.classList.remove('dark');
+    if (isDarkMode) {
+      root.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
   }, [isDarkMode]);
 
   useEffect(() => {
@@ -380,24 +392,27 @@ const App: React.FC = () => {
     }
   };
 
+  const handleTutorialClose = () => {
+    setIsTutorialOpen(false);
+    localStorage.setItem(TUTORIAL_KEY, 'true');
+  };
+
   if (!hasEntered) return <LandingPage onEnter={handleEnter} isDarkMode={isDarkMode} />;
 
-  const displayInputValue = isListening 
-    ? (input + (interimInput ? ' ' + interimInput : '')).trim() 
-    : input;
+  const displayInputValue = (input + (interimInput ? ' ' + interimInput : '')).trim();
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors">
-      <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl border-b border-slate-200 dark:border-slate-800 px-3 md:px-10 py-2.5 md:py-5 flex items-center justify-between shadow-sm z-30">
+    <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors duration-300">
+      <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-2xl border-b border-slate-200 dark:border-slate-800 px-3 md:px-10 py-2.5 md:py-5 flex items-center justify-between shadow-sm z-30 transition-colors duration-300">
         <div className="flex items-center space-x-2">
           <div className="bg-indigo-600 p-1.5 md:p-2 rounded-lg md:rounded-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
             <svg className="h-4 w-4 md:h-6 md:w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
           <div className="hidden xs:flex flex-col">
-            <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display">Mastery Engine</h1>
+            <h1 className="text-xs md:text-xl font-bold text-slate-900 dark:text-slate-100 font-display transition-colors">Mastery Engine</h1>
             <div className="flex items-center space-x-1">
               <div className={`h-1.5 w-1.5 rounded-full ${syncStatus === 'online' ? 'bg-emerald-500 animate-pulse' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'}`}></div>
-              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 transition-colors">
                 Neural Bridge: {syncStatus === 'online' ? 'Synchronized' : syncStatus === 'error' ? 'Sync Error' : 'Offline'}
               </span>
             </div>
@@ -423,7 +438,7 @@ const App: React.FC = () => {
             </button>
             
             {isExportMenuOpen && (
-              <div className="absolute right-0 mt-3 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 animate-in slide-in-from-top-2 duration-300 z-[100] ring-4 ring-indigo-500/5">
+              <div className="absolute right-0 mt-3 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 animate-in slide-in-from-top-2 duration-300 z-[100] ring-4 ring-indigo-500/5 transition-colors">
                 <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 mb-1">
                   <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Synthesis Export</p>
                 </div>
@@ -443,21 +458,37 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <button onClick={() => setIsConfirmClearOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-rose-600" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
-          <button onClick={() => setIsGlossaryOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-amber-500" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
-          <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
-          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1.5 md:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] md:text-xs transition-transform active:scale-90">{isDarkMode ? '☀️' : '🌙'}</button>
+          <button onClick={() => setIsConfirmClearOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-rose-600 transition-colors" title="Clear Thread"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+          <button onClick={() => setIsGlossaryOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-amber-500 transition-colors" title="Glossary Library"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg></button>
+          
+          <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1 transition-colors"></div>
+
+          <button onClick={() => setIsTutorialOpen(true)} className="p-1.5 md:p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Help/Tutorial">
+            <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </button>
+          
+          <button 
+            onClick={() => setIsDarkMode(!isDarkMode)} 
+            className="group relative p-1.5 md:p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all active:scale-90"
+            title={isDarkMode ? 'Switch to Light' : 'Switch to Dark'}
+          >
+            {isDarkMode ? (
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 9H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            ) : (
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+            )}
+          </button>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-8 md:px-20 custom-scrollbar">
+      <main className="flex-1 overflow-y-auto px-4 py-8 md:px-20 custom-scrollbar transition-colors">
         <div className="max-w-5xl mx-auto">
           {messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} onSelectTopic={(t) => sendMessage(`Deconstruct the concept of: ${t}`)} onRefineConcept={(lens) => sendMessage('', null, lens)} onHarvestConcept={handleHarvestConcept} isDarkMode={isDarkMode} />
           ))}
           {isLoading && (
             <div className="flex justify-start mb-8 md:mb-12">
-              <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] md:rounded-[2rem] px-5 md:px-8 py-3 md:py-5 shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center space-x-3 md:space-x-4">
+              <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] md:rounded-[2rem] px-5 md:px-8 py-3 md:py-5 shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center space-x-3 md:space-x-4 transition-all">
                 <div className="flex space-x-1">
                   <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                   <div className="h-1.5 md:h-2 w-1.5 md:w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
@@ -471,7 +502,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <footer className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-t border-slate-200 dark:border-slate-800 p-4 sm:p-8 md:p-12 z-40">
+      <footer className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-t border-slate-200 dark:border-slate-800 p-4 sm:p-8 md:p-12 z-40 transition-colors">
         <div className="max-w-4xl mx-auto">
           <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-2 md:space-x-6">
             <div className="relative flex-1 group">
@@ -480,7 +511,7 @@ const App: React.FC = () => {
                 value={displayInputValue} 
                 onChange={(e) => setInput(e.target.value)} 
                 placeholder={isListening ? "Listening to neural patterns..." : (voiceError || "Enter subject for conceptual deconstruction...")} 
-                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-300 dark:border-indigo-800 ring-4 ring-indigo-500/10' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
+                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all duration-300 ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/10' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
                 disabled={isLoading}
               />
               <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
@@ -520,6 +551,7 @@ const App: React.FC = () => {
       <Glossary items={glossary} onRemove={(id) => setGlossary(prev => { const upd = prev.filter(i => i.id !== id); localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; })} onAdd={(term, sub, def) => { const item = { id: Date.now().toString(), term, subject: sub, definition: def, timestamp: new Date() }; setGlossary(prev => { const upd = [item, ...prev]; localStorage.setItem(GLOSSARY_KEY, JSON.stringify(upd)); return upd; }); }} isOpen={isGlossaryOpen} onClose={() => setIsGlossaryOpen(false)} isDarkMode={isDarkMode} />
       <ConfirmationModal isOpen={isConfirmClearOpen} onClose={() => setIsConfirmClearOpen(false)} onConfirm={handleClearHistory} title="Reset Deconstruction" message="This will clear the current architectural thread. All derived logic will be lost from view." confirmLabel="Confirm Reset" isDarkMode={isDarkMode} />
       <LiveAudioSession isOpen={isLiveSessionOpen} onClose={() => setIsLiveSessionOpen(false)} isDarkMode={isDarkMode} systemInstruction={SYSTEM_INSTRUCTION} />
+      <TutorialOverlay isOpen={isTutorialOpen} onClose={handleTutorialClose} isDarkMode={isDarkMode} />
     </div>
   );
 };
