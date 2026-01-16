@@ -32,10 +32,12 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
   }, [appDarkMode]);
 
   const sanitizeMermaid = (raw: string): string => {
-    // 1. Basic cleanup of code blocks and common AI artifacts
+    // 1. Basic cleanup of code blocks, common AI artifacts, and smart quotes
     let processed = raw
       .replace(/```mermaid\n?|```/g, '')
       .replace(/^[\d]+\.\s*/gm, '') // Remove numbered list markers at start of lines
+      .replace(/[“”]/g, '"') // Normalize smart double quotes
+      .replace(/[‘’]/g, "'") // Normalize smart single quotes
       .trim();
     
     // 2. Fix common AI arrow mistakes
@@ -66,20 +68,34 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
       lines.unshift('flowchart TD');
     }
 
-    // 4. Sanitize node labels
+    // 4. Sanitize node labels and IDs
     const sanitizedLines = lines.map(line => {
       let l = line.trim();
       // Skip headers, empty lines, and comments
       if (!l || l.match(headerRegex) || l.startsWith('%%')) return l;
       
-      // Clean up "hanging" quotes from AI hallucinations around IDs e.g. "A"[Label]
-      l = l.replace(/"([a-zA-Z0-9_\-]+)"/g, '$1');
+      // Fix: Remove quotes surrounding node definitions
+      // Matches: "SomeID" [ or "SomeID"[ or "Some ID"[
+      // We capture the ID content and the shape opener.
+      l = l.replace(/"([^"]+)"\s*([\[\(\{\>])/g, (match, idContent, shapeOpen) => {
+          // Sanitize ID: remove spaces, special chars that break IDs
+          const cleanId = idContent.trim().replace(/\s+/g, '_').replace(/[^\w\-\.]/g, '_');
+          return `${cleanId}${shapeOpen}`;
+      });
+
+      // Fix: Clean up "hanging" quotes for standalone IDs (e.g. A --> "B")
+      // Handles A --> "B" or A --> "B Node"
+      l = l.replace(/(^|[\s\->;])"([^"]+)"([\s\->;]|$)/g, (match, prefix, idContent, suffix) => {
+         const cleanId = idContent.trim().replace(/\s+/g, '_').replace(/[^\w\-\.]/g, '_');
+         return `${prefix}${cleanId}${suffix}`;
+      });
 
       /**
        * Regex to match all Mermaid node shapes.
        * Captures: ID, Open, Content, Close.
+       * Updated ID capture to include dots [a-zA-Z0-9_\-\.]
        */
-      const nodeRegex = /([a-zA-Z0-9_\-]+)\s*(?:(\[\()(.+?)(\)\])|(\[\[)(.+?)(\]\])|(\{\{)(.+?)(\}\})|(\(\()(.+?)(\)\))|(\[\/)(.+?)(\\\])|(\[\\)(.+?)(\/\])|(\[)(.+?)(\])|(\()(.+?)(\))|(\{)(.+?)(\})|(\>)(.+?)(\]))/g;
+      const nodeRegex = /([a-zA-Z0-9_\-\.]+)\s*(?:(\[\()(.+?)(\)\])|(\[\[)(.+?)(\]\])|(\{\{)(.+?)(\}\})|(\(\()(.+?)(\)\))|(\[\/)(.+?)(\\\])|(\[)(.+?)(\])|(\()(.+?)(\))|(\{)(.+?)(\})|(\>)(.+?)(\]))/g;
 
       return l.replace(nodeRegex, (match, id, ...args) => {
         // Find the matched group for open/label/close
@@ -157,7 +173,23 @@ const Diagram: React.FC<DiagramProps> = ({ chart, isDarkMode: appDarkMode }) => 
     return () => { active = false; };
   }, [chart, effectiveDarkMode]);
 
-  if (error) return null;
+  // Fallback to raw text if rendering fails
+  if (error) {
+    return (
+      <div className="my-6 md:my-10 relative group">
+        <div className={`relative z-10 rounded-2xl border border-red-200 dark:border-red-900/30 p-6 ${effectiveDarkMode ? 'bg-red-950/10' : 'bg-red-50/50'}`}>
+          <div className="flex items-center space-x-2 mb-3">
+             <svg className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+             <h4 className="text-[10px] font-bold uppercase tracking-widest text-red-500">Diagram Render Issue</h4>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 font-medium">Using fallback text visualization:</p>
+          <pre className="text-[10px] md:text-xs font-mono text-slate-600 dark:text-slate-300 overflow-x-auto whitespace-pre p-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-800">
+            {chart}
+          </pre>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="my-6 md:my-10 relative group">

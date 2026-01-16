@@ -22,7 +22,7 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries: number = 2): Promi
         await sleep(waitTime);
         continue;
       }
-      // If it's a 403 or 400, don't retry, just throw
+      // If it's a 403 or 400 or 404, don't retry, just throw
       throw error;
     }
   }
@@ -74,9 +74,9 @@ export const getGeminiResponse = async (
       contents.shift();
     }
 
-    // Using gemini-flash-lite-latest for efficiency and lower latency
+    // Using gemini-3-flash-preview for stability and better logic generation
     const response = await ai.models.generateContent({
-      model: 'gemini-flash-lite-latest',
+      model: 'gemini-3-flash-preview',
       contents,
       config: {
         systemInstruction: `You are Mastery Engine, a conceptual architect. 
@@ -89,6 +89,7 @@ export const getGeminiResponse = async (
         2. EXPLAIN THE CONCEPT FIRST, then provide the answer.
         3. NO markdown headers (#) or bold/italic markers (*). 
         4. Use the specific numbered structure below.
+        5. For the CONCEPT MAP, strictly use standard "flowchart TD" syntax. Do not use special characters in node IDs.
 
         STRUCTURE:
         
@@ -102,7 +103,7 @@ export const getGeminiResponse = async (
         [Apply the concept to the student's specific question.]
 
         4. CONCEPT MAP
-        [A simple Mermaid flowchart showing the hierarchy of ideas.]
+        [A simple Mermaid flowchart TD showing the hierarchy of ideas.]
 
         EXPANSION_NODES: [Topic A, Topic B, Topic C]`,
         temperature: 0.7,
