@@ -91,7 +91,6 @@ const App: React.FC = () => {
   const handleEnter = () => {
     setHasEntered(true);
     localStorage.setItem(ENTRY_KEY, 'true');
-    // Trigger tutorial for first time users
     if (!localStorage.getItem(TUTORIAL_KEY)) {
       setIsTutorialOpen(true);
     }
@@ -101,9 +100,14 @@ const App: React.FC = () => {
     isStoppingRef.current = true;
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
       } catch (e) {
         console.warn("Speech recognition stop error:", e);
+      } finally {
+        recognitionRef.current = null;
       }
     }
     setIsListening(false);
@@ -113,14 +117,14 @@ const App: React.FC = () => {
   const startVoiceInput = useCallback(async () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setVoiceError("System: API Unsupported");
+      setVoiceError("System: Browser Unsupported");
       return;
     }
 
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      setVoiceError("System: Access Denied");
+      setVoiceError("System: Mic Denied");
       return;
     }
 
@@ -138,37 +142,37 @@ const App: React.FC = () => {
     };
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
+      let finalBatch = '';
+      let interimBatch = '';
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript;
+          finalBatch += transcript;
         } else {
-          interimTranscript += transcript;
+          interimBatch += transcript;
         }
       }
 
-      if (finalTranscript) {
+      if (finalBatch) {
         setInput(prev => {
-          const combined = (prev.trim() + ' ' + finalTranscript).trim();
-          return combined;
+          const trimmedPrev = prev.trim();
+          return trimmedPrev ? `${trimmedPrev} ${finalBatch.trim()}` : finalBatch.trim();
         });
+        setInterimInput('');
+      } else {
+        setInterimInput(interimBatch);
       }
-      setInterimInput(interimTranscript);
     };
 
     recognition.onerror = (event: any) => {
       if (event.error === 'no-speech') return;
-      console.error("Speech Recognition Error:", event.error);
       setVoiceError(`System: ${event.error}`);
       stopVoiceInput();
     };
 
     recognition.onend = () => {
-      if (!isStoppingRef.current) {
-        // Handle unexpected service disconnection by attempting a restart
+      if (!isStoppingRef.current && isListening) {
         try {
           recognition.start();
         } catch (e) {
@@ -188,7 +192,7 @@ const App: React.FC = () => {
       setVoiceError("System: Start Failed");
       setIsListening(false);
     }
-  }, [stopVoiceInput]);
+  }, [stopVoiceInput, isListening]);
 
   const toggleVoiceInput = () => {
     if (isListening) stopVoiceInput();
@@ -206,7 +210,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (voiceError) {
-      const timer = setTimeout(() => setVoiceError(null), 3000);
+      const timer = setTimeout(() => setVoiceError(null), 3500);
       return () => clearTimeout(timer);
     }
   }, [voiceError]);
@@ -342,15 +346,15 @@ const App: React.FC = () => {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
   const sendMessage = async (text: string, file?: FileData | null, lens?: string) => {
-    const messageContent = (text || interimInput).trim();
-    if ((!messageContent && !file && !lens) || isLoading) return;
+    const combinedInput = (text || interimInput).trim();
+    if ((!combinedInput && !file && !lens) || isLoading) return;
     
     if (isListening) stopVoiceInput();
     
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: lens ? `Focus Analysis Lens: ${lens}` : messageContent || "Reference Context Uploaded",
+      content: lens ? `Focus Analysis Lens: ${lens}` : combinedInput || "Reference Context Uploaded",
       timestamp: new Date(),
       attachment: file || undefined
     };
@@ -367,7 +371,7 @@ const App: React.FC = () => {
 
     try {
       const responseText = await getGeminiResponse(
-        lens ? `${messageContent} (Pivot through ${lens})` : (messageContent || "Describe the attached context."), 
+        lens ? `${combinedInput} (Pivot through ${lens})` : (combinedInput || "Describe the attached context."), 
         historySnapshot, 
         file || undefined
       );
@@ -506,19 +510,27 @@ const App: React.FC = () => {
         <div className="max-w-4xl mx-auto">
           <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-2 md:space-x-6">
             <div className="relative flex-1 group">
+              <div className={`absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-[1.6rem] md:rounded-[2.1rem] blur opacity-20 group-focus-within:opacity-40 transition-opacity duration-500 ${isListening ? 'opacity-50 animate-pulse' : ''}`}></div>
               <input 
                 type="text" 
                 value={displayInputValue} 
                 onChange={(e) => setInput(e.target.value)} 
                 placeholder={isListening ? "Listening to neural patterns..." : (voiceError || "Enter subject for conceptual deconstruction...")} 
-                className={`w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all duration-300 ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-400 dark:border-indigo-600 ring-4 ring-indigo-500/10' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
+                className={`relative w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all duration-300 ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-400 dark:border-indigo-600' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
                 disabled={isLoading}
               />
               <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                {isListening && (
+                  <div className="flex items-center space-x-0.5 px-2 md:px-3 h-4">
+                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave [animation-delay:-0.3s]"></div>
+                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave [animation-delay:-0.15s]"></div>
+                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave"></div>
+                  </div>
+                )}
                 <button 
                   type="button" 
                   onClick={toggleVoiceInput} 
-                  className={`p-1.5 md:p-2 rounded-full transition-all ${isListening ? 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 animate-pulse ring-4 ring-indigo-500/30 shadow-lg shadow-indigo-500/40' : 'text-slate-400 hover:text-indigo-600'}`}
+                  className={`p-1.5 md:p-2 rounded-full transition-all ${isListening ? 'text-white bg-indigo-600 ring-4 ring-indigo-500/30 shadow-lg' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
                   title={isListening ? "End Voice Input" : "Begin Voice Input"}
                 >
                   <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
