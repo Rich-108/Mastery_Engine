@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Message, FileData, GlossaryItem, SavedSession } from './types';
+import { Message, FileData, GlossaryItem } from './types';
 import { getGeminiResponse } from './services/geminiService';
 import ChatMessage from './components/ChatMessage';
 import Glossary from './components/Glossary';
@@ -38,7 +37,7 @@ const App: React.FC = () => {
   const [isLiveSessionOpen, setIsLiveSessionOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   
-  const [isApiKeyValid, setIsApiKeyValid] = useState(() => {
+  const [isApiKeyValid] = useState(() => {
     const key = process.env.API_KEY;
     return !!key && key !== "undefined" && key !== "";
   });
@@ -75,6 +74,7 @@ const App: React.FC = () => {
   const [interimInput, setInterimInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isInitializingVoice, setIsInitializingVoice] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -86,7 +86,7 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportButtonRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const isStoppingRef = useRef(false);
+  const isListeningRef = useRef(false);
 
   const handleEnter = () => {
     setHasEntered(true);
@@ -97,116 +97,142 @@ const App: React.FC = () => {
   };
 
   const stopVoiceInput = useCallback(() => {
-    isStoppingRef.current = true;
+    isListeningRef.current = false;
     if (recognitionRef.current) {
       try {
         recognitionRef.current.onresult = null;
         recognitionRef.current.onerror = null;
         recognitionRef.current.onend = null;
         recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch (e) {
-        console.warn("Speech recognition stop error:", e);
+        console.warn("Speech engine cleanup:", e);
       } finally {
         recognitionRef.current = null;
       }
     }
     setIsListening(false);
+    setIsInitializingVoice(false);
     setInterimInput('');
   }, []);
 
   const startVoiceInput = useCallback(async () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setVoiceError("System: Browser Unsupported");
+      setVoiceError("Browser Unsupported");
       return;
     }
 
+    setIsInitializingVoice(true);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      setVoiceError("System: Mic Denied");
+      console.error("Mic Access Error:", err);
+      setVoiceError("Mic Access Denied");
+      setIsInitializingVoice(false);
       return;
     }
 
     if (recognitionRef.current) stopVoiceInput();
-    isStoppingRef.current = false;
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setVoiceError(null);
-    };
-
-    recognition.onresult = (event: any) => {
-      let finalBatch = '';
-      let interimBatch = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalBatch += transcript;
-        } else {
-          interimBatch += transcript;
-        }
-      }
-
-      if (finalBatch) {
-        setInput(prev => {
-          const trimmedPrev = prev.trim();
-          return trimmedPrev ? `${trimmedPrev} ${finalBatch.trim()}` : finalBatch.trim();
-        });
-        setInterimInput('');
-      } else {
-        setInterimInput(interimBatch);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech') return;
-      setVoiceError(`System: ${event.error}`);
-      stopVoiceInput();
-    };
-
-    recognition.onend = () => {
-      if (!isStoppingRef.current && isListening) {
-        try {
-          recognition.start();
-        } catch (e) {
-          setIsListening(false);
-        }
-      } else {
-        setIsListening(false);
-        setInterimInput('');
-        recognitionRef.current = null;
-      }
-    };
-
-    recognitionRef.current = recognition;
     try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setIsInitializingVoice(false);
+        isListeningRef.current = true;
+        setVoiceError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        if (!isListeningRef.current) return;
+        
+        let finalBatch = '';
+        let interimBatch = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalBatch += transcript;
+          } else {
+            interimBatch += transcript;
+          }
+        }
+
+        if (finalBatch) {
+          setInput(prev => {
+            const trimmed = prev.trim();
+            return trimmed ? `${trimmed} ${finalBatch.trim()}` : finalBatch.trim();
+          });
+          setInterimInput('');
+        } else {
+          setInterimInput(interimBatch);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        const errType = event.error;
+        console.error("Speech Recognition Engine Error:", errType);
+
+        if (errType === 'no-speech') {
+          // No speech detected is often transient in continuous mode. 
+          // We show a brief non-intrusive hint instead of stopping.
+          setVoiceError("I didn't catch that...");
+          return;
+        }
+
+        if (errType === 'audio-capture') {
+          setVoiceError("Mic Hardware Failure");
+          stopVoiceInput();
+        } else if (errType === 'not-allowed') {
+          setVoiceError("Mic Permission Required");
+          stopVoiceInput();
+        } else if (errType === 'network') {
+          setVoiceError("Voice Network Error");
+          stopVoiceInput();
+        } else if (errType !== 'aborted') {
+          setVoiceError(`Voice Error: ${errType}`);
+          stopVoiceInput();
+        }
+      };
+
+      recognition.onend = () => {
+        // Automatic restart if still supposed to be active (continuous behavior)
+        if (isListeningRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.warn("Auto-restart failed:", e);
+            stopVoiceInput();
+          }
+        }
+      };
+
+      recognitionRef.current = recognition;
       recognition.start();
-    } catch (e) {
-      setVoiceError("System: Start Failed");
+    } catch (err) {
+      console.error("Engine Init Failed:", err);
+      setVoiceError("Engine Failure");
       setIsListening(false);
+      setIsInitializingVoice(false);
     }
-  }, [stopVoiceInput, isListening]);
+  }, [stopVoiceInput]);
 
   const toggleVoiceInput = () => {
-    if (isListening) stopVoiceInput();
-    else startVoiceInput();
+    if (isListening || isListeningRef.current || isInitializingVoice) {
+      stopVoiceInput();
+    } else {
+      startVoiceInput();
+    }
   };
 
   useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
-      }
-    };
-  }, []);
+    return () => stopVoiceInput();
+  }, [stopVoiceInput]);
 
   useEffect(() => {
     if (voiceError) {
@@ -346,15 +372,15 @@ const App: React.FC = () => {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
   const sendMessage = async (text: string, file?: FileData | null, lens?: string) => {
-    const combinedInput = (text || interimInput).trim();
-    if ((!combinedInput && !file && !lens) || isLoading) return;
+    const combinedContent = (text || interimInput).trim();
+    if ((!combinedContent && !file && !lens) || isLoading) return;
     
-    if (isListening) stopVoiceInput();
+    if (isListening || isListeningRef.current) stopVoiceInput();
     
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: lens ? `Focus Analysis Lens: ${lens}` : combinedInput || "Reference Context Uploaded",
+      content: lens ? `Focus Analysis Lens: ${lens}` : combinedContent || "Reference Context Uploaded",
       timestamp: new Date(),
       attachment: file || undefined
     };
@@ -371,7 +397,7 @@ const App: React.FC = () => {
 
     try {
       const responseText = await getGeminiResponse(
-        lens ? `${combinedInput} (Pivot through ${lens})` : (combinedInput || "Describe the attached context."), 
+        lens ? `${combinedContent} (Pivot through ${lens})` : (combinedContent || "Describe the attached context."), 
         historySnapshot, 
         file || undefined
       );
@@ -423,7 +449,7 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <div className="flex items-center space-x-1 md:space-x-3">
+        <div className="flex items-center space-x-1 md:space-x-4">
           <button 
             onClick={() => setIsLiveSessionOpen(true)}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-600 hover:text-white transition-all group active:scale-95"
@@ -435,29 +461,49 @@ const App: React.FC = () => {
           <div className="relative" ref={exportButtonRef}>
             <button 
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} 
-              className={`p-1.5 md:p-2 rounded-lg transition-all ${isExportMenuOpen ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600'}`}
-              title="Export Archive"
+              className={`flex items-center space-x-2 px-3 py-1.5 md:px-4 md:py-2 rounded-xl transition-all border ${
+                isExportMenuOpen 
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' 
+                  : 'bg-indigo-50 dark:bg-slate-800/50 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-slate-700 hover:bg-indigo-100 dark:hover:bg-slate-700'
+              }`}
+              title="Export Synthesis Archive"
             >
-              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              <svg className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span className="hidden sm:inline text-[11px] md:text-xs font-black uppercase tracking-widest">Export</span>
+              <svg className={`h-3 w-3 transition-transform duration-200 ${isExportMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
             
             {isExportMenuOpen && (
-              <div className="absolute right-0 mt-3 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 animate-in slide-in-from-top-2 duration-300 z-[100] ring-4 ring-indigo-500/5 transition-colors">
+              <div className="absolute right-0 mt-3 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 animate-in slide-in-from-top-2 fade-in duration-200 z-[100] ring-4 ring-indigo-500/5 transition-colors overflow-hidden backdrop-blur-xl">
                 <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 mb-1">
-                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Synthesis Export</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-[0.2em]">Synthesis Engine</p>
                 </div>
-                <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 mr-3 animate-pulse"></span> Export as PDF
-                </button>
-                <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 mr-3"></span> Export as Word (.doc)
-                </button>
-                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 mr-3"></span> Export as Transcript
-                </button>
-                <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-2.5 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 mr-3"></span> Export as JSON Data
-                </button>
+                <div className="grid grid-cols-1 gap-0.5">
+                  <button onClick={() => handleExport('pdf')} className="w-full text-left px-3 py-3 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                    <div className="w-2 h-2 rounded-full bg-rose-500 mr-3 animate-pulse"></div>
+                    <span className="flex-1">Export as PDF</span>
+                    <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">.pdf</span>
+                  </button>
+                  <button onClick={() => handleExport('word')} className="w-full text-left px-3 py-3 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 mr-3"></div>
+                    <span className="flex-1">Export as MS Word</span>
+                    <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">.doc</span>
+                  </button>
+                  <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-3 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                    <div className="w-2 h-2 rounded-full bg-slate-400 mr-3"></div>
+                    <span className="flex-1">Plain Transcript</span>
+                    <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">.txt</span>
+                  </button>
+                  <button onClick={() => handleExport('json')} className="w-full text-left px-3 py-3 text-[10px] md:text-[11px] font-bold text-slate-600 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-700/50 rounded-xl flex items-center transition-colors">
+                    <div className="w-2 h-2 rounded-full bg-indigo-500 mr-3"></div>
+                    <span className="flex-1">Neural Data Map</span>
+                    <span className="text-[8px] font-black text-slate-300 dark:text-slate-600">.json</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -508,35 +554,38 @@ const App: React.FC = () => {
 
       <footer className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-3xl border-t border-slate-200 dark:border-slate-800 p-4 sm:p-8 md:p-12 z-40 transition-colors">
         <div className="max-w-4xl mx-auto">
-          <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-2 md:space-x-6">
+          {/* Transcription HUD Overlay */}
+          {(isListening || interimInput || voiceError) && (
+            <div className="mb-4 animate-in fade-in slide-in-from-bottom-2">
+              <div className={`px-6 py-3 rounded-full inline-flex items-center space-x-3 shadow-xl border max-w-full overflow-hidden transition-colors ${voiceError ? 'bg-rose-600 border-rose-500 text-white shadow-rose-500/20' : 'bg-indigo-600 border-white/10 text-white shadow-indigo-500/20'}`}>
+                {voiceError ? (
+                  <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                ) : (
+                  <div className="flex space-x-1 flex-shrink-0">
+                    <div className="w-1 h-3 bg-white/40 rounded-full animate-voice-wave [animation-delay:-0.3s]"></div>
+                    <div className="w-1 h-3 bg-white/80 rounded-full animate-voice-wave [animation-delay:-0.15s]"></div>
+                    <div className="w-1 h-3 bg-white/40 rounded-full animate-voice-wave"></div>
+                  </div>
+                )}
+                <p className="text-[10px] md:text-xs font-bold truncate italic">
+                  {voiceError || interimInput || "Listening for concepts..."}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={(e) => { e.preventDefault(); sendMessage(input, selectedFile); }} className="flex items-center space-x-2 md:space-x-4">
             <div className="relative flex-1 group">
               <div className={`absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-[1.6rem] md:rounded-[2.1rem] blur opacity-20 group-focus-within:opacity-40 transition-opacity duration-500 ${isListening ? 'opacity-50 animate-pulse' : ''}`}></div>
               <input 
                 type="text" 
                 value={displayInputValue} 
                 onChange={(e) => setInput(e.target.value)} 
-                placeholder={isListening ? "Listening to neural patterns..." : (voiceError || "Enter subject for conceptual deconstruction...")} 
-                className={`relative w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3 md:py-4.5 pr-20 md:pr-36 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all duration-300 ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-400 dark:border-indigo-600' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
+                placeholder={isInitializingVoice ? "Synchronizing microphone..." : (isListening ? "Neural voice processing..." : (voiceError || "Enter subject for deconstruction..."))} 
+                className={`relative w-full border rounded-[1.5rem] md:rounded-[2rem] px-4 md:px-8 py-3.5 md:py-5 pr-20 md:pr-32 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-100 shadow-2xl border-slate-200 dark:border-slate-700 text-[11px] md:text-[15px] font-medium transition-all duration-300 ${isListening ? 'bg-indigo-50/20 dark:bg-indigo-900/10 border-indigo-400 dark:border-indigo-600' : voiceError ? 'bg-rose-50/20 dark:bg-rose-950/10 border-rose-200 dark:border-rose-800' : 'bg-slate-50 dark:bg-slate-800'}`}
                 disabled={isLoading}
               />
-              <div className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1">
-                {isListening && (
-                  <div className="flex items-center space-x-0.5 px-2 md:px-3 h-4">
-                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave [animation-delay:-0.3s]"></div>
-                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave [animation-delay:-0.15s]"></div>
-                    <div className="w-0.5 md:w-1 bg-indigo-500 rounded-full animate-voice-wave"></div>
-                  </div>
-                )}
-                <button 
-                  type="button" 
-                  onClick={toggleVoiceInput} 
-                  className={`p-1.5 md:p-2 rounded-full transition-all ${isListening ? 'text-white bg-indigo-600 ring-4 ring-indigo-500/30 shadow-lg' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
-                  title={isListening ? "End Voice Input" : "Begin Voice Input"}
-                >
-                  <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </button>
+              <div className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 flex items-center space-x-1">
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 md:p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Reference Image">
                   <svg className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h14a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                 </button>
@@ -549,6 +598,28 @@ const App: React.FC = () => {
                 }} />
               </div>
             </div>
+
+            <button 
+              type="button" 
+              onClick={toggleVoiceInput} 
+              className={`flex items-center justify-center h-12 w-12 md:h-16 md:w-16 rounded-xl md:rounded-[1.5rem] shadow-2xl transition-all duration-500 flex-shrink-0 border-2 ${
+                isListening || isInitializingVoice
+                  ? 'bg-indigo-600 border-indigo-500 text-white ring-4 ring-indigo-500/20 animate-sphere-pulse' 
+                  : voiceError 
+                    ? 'bg-rose-600 border-rose-500 text-white animate-pulse'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 dark:hover:border-indigo-900/30'
+              }`}
+              title={isListening ? "End Voice Input" : "Begin Voice Input"}
+            >
+              {isInitializingVoice ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              ) : (
+                <svg className="h-5 w-5 md:h-7 md:w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              )}
+            </button>
+
             <button 
               type="submit" 
               disabled={(!displayInputValue && !selectedFile) || isLoading} 
